@@ -14,7 +14,7 @@ test | nix-build | pre-commit) ;;
 esac
 
 mkdir -p test-logs
-nix_args=(develop)
+nix_args=(develop --print-build-logs)
 if [[ -n ${RUNNER_TEMP:-} ]]; then
 	# Keep the activated closure rooted for the lifetime of the CI job.
 	nix_args+=(--profile "$RUNNER_TEMP/isonim-blog-dev-shell")
