@@ -17,21 +17,39 @@ concurrency:
 # Bootstrap supports Nix on Linux and macOS. Windows is not a supported
 # development/package target; no Windows success is implied by this matrix.
 jobs:
+  # Resolve each platform separately: matrix reusable-workflow calls expose
+  # only one final output, which would lose the other platforms' decisions.
+  linux-x64:
+    name: Choose Linux x64 runner
+    uses: metacraft-labs/devops-modules/.github/workflows/reusable-choose-runner.yml@571c44be3fb2e8c096cfb5848fffb79a6347a943
+    with:
+      preferred: ubuntu-24.04
+      fallback: '["self-hosted","linux","x64"]'
+  linux-arm64:
+    name: Choose Linux arm64 runner
+    uses: metacraft-labs/devops-modules/.github/workflows/reusable-choose-runner.yml@571c44be3fb2e8c096cfb5848fffb79a6347a943
+    with:
+      preferred: ubuntu-24.04-arm
+      fallback: '["self-hosted","linux","arm64"]'
+  macos-arm64:
+    name: Choose macOS arm64 runner
+    uses: metacraft-labs/devops-modules/.github/workflows/reusable-choose-runner.yml@571c44be3fb2e8c096cfb5848fffb79a6347a943
+    with:
+      preferred: macos-15
+      fallback: '["self-hosted","macos","arm64"]'
   check:
-    name: ${{ matrix.command }} (${{ join(matrix.runner, '-') }})
+    name: ${{ matrix.command }} (${{ matrix.platform }})
+    needs: [linux-x64, linux-arm64, macos-arm64]
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         command: [test, nix-build]
-        runner:
-          - [self-hosted, linux, x64]
-          - [self-hosted, linux, arm64]
-          - [self-hosted, macos, arm64]
+        platform: [linux-x64, linux-arm64, macos-arm64]
         include:
           - command: pre-commit
-            runner: [self-hosted, linux, x64]
-    runs-on: ${{ matrix.runner }}
+            platform: linux-x64
+    runs-on: ${{ fromJSON(needs[matrix.platform].outputs.runs_on) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,7 +66,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.command }}-${{ join(matrix.runner, '-') }}
+          name: ${{ matrix.command }}-${{ matrix.platform }}
           path: test-logs/
           retention-days: 1
       - name: Mirror logs to durable storage
@@ -62,5 +80,5 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.MCL_S3_ARTIFACTS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MCL_S3_ARTIFACTS_SECRET_ACCESS_KEY }}
           AWS_EC2_METADATA_DISABLED: "true"
-          S3_OBJECT_PREFIX: isonim-blog/${{ github.run_id }}/${{ matrix.command }}-${{ join(matrix.runner, '-') }}
+          S3_OBJECT_PREFIX: isonim-blog/${{ github.run_id }}/${{ matrix.command }}-${{ matrix.platform }}
         run: bash scripts/mirror-artifacts.sh

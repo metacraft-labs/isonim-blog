@@ -42,6 +42,16 @@ CI covers Linux x64/arm64 and macOS arm64 through the Nix environment. Windows
 is not currently a supported development or package target. The native CLI
 and backend-independent tests are both built; no browser tooling is needed.
 
+Each platform resolves its runner through the shared chooser and the
+organization/repository Actions variable `CI_RUNNER_MODE`. With the variable
+unset, this public repository uses GitHub-hosted runners: `ubuntu-24.04` for
+Linux x64, `ubuntu-24.04-arm` for Linux arm64, and `macos-15` for macOS arm64.
+Explicit `github-hosted` selects those same runners. `self-hosted` or an
+unrecognized value selects the corresponding `[self-hosted, linux, x64]`,
+`[self-hosted, linux, arm64]` or `[self-hosted, macos, arm64]` capability labels.
+The test and package gates run on all three native platforms; pre-commit runs
+on Linux x64. Job and artifact names use the platform, independent of mode.
+
 Normal CI runs on `dev` and `stable` pushes and pull requests targeting those
 branches. A reviewed bootstrap candidate can also be qualified by pushing its
 exact commit to a temporary `ci/qualify-bootstrap-<identifier>` branch. This
