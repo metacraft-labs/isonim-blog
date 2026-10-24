@@ -1,2 +1,17 @@
 # isonim-blog
-isonim-blog — a Jekyll-style static-blog framework on the IsoNim isomorphic reactive UI framework for Nim (posts and drafts, layouts and includes, permalinks, collections and taxonomies, feeds, themes, and a new/serve/build CLI).
+
+A static-blog framework being built on [IsoNim](https://github.com/metacraft-labs/isonim).
+
+This development snapshot provides a bootstrap CLI with help and version
+reporting. Site generation, preview and themes are not available yet.
+
+With Nix installed, build and inspect the CLI:
+
+```sh
+nix build
+./result/bin/isonim-blog --help
+./result/bin/isonim-blog --version
+```
+
+See the [development notes](docs/contributors/development.md) and
+[agent guide](AGENTS.md) to contribute. Licensed under [Apache-2.0](LICENSE).

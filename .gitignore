@@ -1,0 +1,8 @@
+/.direnv/
+/.repro/
+/.pre-commit-config.yaml
+/build/
+/test-logs/
+/result
+/result-*
+*.ct
