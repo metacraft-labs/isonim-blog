@@ -6,7 +6,7 @@ import std/os
 let root = currentSourcePath().parentDir()
 switch("path", root / "src")
 
-proc dependency(name, envName: string) =
+proc dependency(name, envName, define: string) =
   let sibling = root.parentDir() / name
   let pinned = getEnv(envName)
   let usePinned = getEnv("ISONIM_BLOG_PINNED_SOURCES") == "1"
@@ -16,13 +16,15 @@ proc dependency(name, envName: string) =
   if selected.len == 0 or not dirExists(selected / "src"):
     raise newException(ValueError, "Missing " & name & " sources: enter nix develop or provide a sibling checkout")
   switch("path", selected / "src")
+  # Tests compile site programs; they must use the very trees chosen here.
+  switch("define", define & "=" & selected)
 
 # Repro compiles its tool-only recipe before activating the project's environment.
 # Library dependencies belong to the resulting source/test compiles, not that
 # provider executable. Requiring them here would prevent standalone activation.
 if projectName() != "repro":
-  dependency("isonim", "ISONIM_BLOG_ISONIM_SRC")
-  dependency("nim-everywhere", "ISONIM_BLOG_NIM_EVERYWHERE_SRC")
+  dependency("isonim", "ISONIM_BLOG_ISONIM_SRC", "isonimBlogIsonimSrc")
+  dependency("nim-everywhere", "ISONIM_BLOG_NIM_EVERYWHERE_SRC", "isonimBlogNimEverywhereSrc")
 
 if getCommand() == "js":
   # NimScript itself runs in the VM, so `defined(js)` is not the target test.

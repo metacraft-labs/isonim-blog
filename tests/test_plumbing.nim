@@ -18,7 +18,7 @@ suite "bootstrap plumbing":
     check response.exitCode == 0
     check response.error == ""
     check response.output.contains("--version")
-    check response.output.contains("Site generation commands are not available yet.")
+    check response.output.contains("build [--drafts] [--future]")
     check runCli(newSeq[string]()).output == response.output
 
   test "version comes from the package manifest":
@@ -28,7 +28,7 @@ suite "bootstrap plumbing":
     check response.exitCode == 0
 
   test "unsupported and extra arguments fail without pretending to build":
-    for args in [@["build"], @["--version", "extra"], @["--unknown"]]:
+    for args in [@["build", "extra"], @["build", "--out"], @["--version", "extra"], @["--unknown"]]:
       let response = runCli(args)
       check response.exitCode == 1
       check response.output == ""

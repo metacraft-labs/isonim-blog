@@ -2,15 +2,17 @@
 
 A static-blog framework being built on [IsoNim](https://github.com/metacraft-labs/isonim).
 
-This development snapshot provides a bootstrap CLI with help and version
-reporting. Site generation, preview and themes are not available yet.
+This development snapshot builds sites: posts, drafts, pages, collections,
+data and assets, rendered through layouts written as IsoNim components, with
+zero JavaScript by default and byte-reproducible Nix builds. Feeds, archives,
+images, the preview server, project scaffolding and packaged themes are not
+available yet. See [Building a site](docs/users/building-a-site.md).
 
-With Nix installed, build and inspect the CLI:
+With Nix installed, build the CLI and the example site:
 
 ```sh
 nix build
-./result/bin/isonim-blog --help
-./result/bin/isonim-blog --version
+cd examples/basic && ../../result/bin/isonim-blog build
 ```
 
 See the [development notes](docs/contributors/development.md) and

@@ -1,8 +1,37 @@
 # Development
 
-The repository currently supplies the build plumbing and a CLI with help and
-version reporting. The site model, generation, preview server and themes are
-not implemented yet. Start with the commands in [AGENTS.md](../../AGENTS.md).
+The repository supplies the site model and the `build` command described in
+[Building a site](../users/building-a-site.md). Feeds, archives, images, the
+preview server, scaffolding and packaged themes are not implemented yet.
+Start with the commands in [AGENTS.md](../../AGENTS.md).
+
+## Source map
+
+- `src/isonim_blog/model.nim`: backend-independent configuration, front
+  matter, permalink and collision rules (tested on C and JavaScript).
+- `src/isonim_blog/inputs.nim`: the native input boundary. It walks only the
+  declared directories and decodes TOML with the pinned Python `tomllib`.
+- `src/isonim_blog/program.nim`: generates the layout program from
+  `layouts/` and `includes/` (code only) and compiles it once per source hash.
+- `src/isonim_blog/runtime.nim`: what the compiled program runs; it reads the
+  content and exports the site through `isonim/static`.
+- `src/isonim_blog_prepare.nim`: the preparation step as a separate tool, used
+  by the Reprobuild graph and by the Nix `buildSite` wrapper (`nix/site.nix`).
+- `examples/basic/` is the generic fixture site; `tests/fixtures/` holds a
+  theme and an islands site for the Nix checks and tests.
+
+## Build graph
+
+`repro.nim` builds the example site as separate edges: preparation reads only
+layouts and includes, the compile reads the prepared program and library
+sources, and the export reads the content. A content-only edit re-runs the
+export and is a cache hit for the compile; a layout or include edit re-runs
+preparation and the compile. Select it with `repro build example-basic`.
+The export edge currently re-runs on every build: IsoNim publishes the output
+directory with a raw `renameat2` system call that the Reprobuild monitor does
+not yet observe, so the engine conservatively withholds that edge's cache
+record. The prepare and export tools are built by the graph itself, so their
+edges run them with `inlineExecCall` and depend on the producing compile.
 
 ## Dependencies
 
@@ -25,9 +54,12 @@ nim c -r --out:build/tests/test_plumbing --nimcache:build/nimcache/direct-c test
 ```
 
 The Nimble manifest owns the version. No release is implied by a development
-build reporting that version. `nix build` installs `bin/isonim-blog` and its
-Apache-2.0 license, after running the C and JavaScript test binaries inside the
-sandbox against locked inputs, with no sibling checkouts or network access.
+build reporting that version. `nix build` installs `bin/isonim-blog`,
+`bin/isonim-blog-prepare` and the Apache-2.0 license, after running every test
+suite inside the sandbox against locked inputs, with no sibling checkouts or
+network access. `just nix-build` also builds the `example-basic`,
+`build-site-contract` and `build-site-islands` checks; `nix build
+.#checks.<system>.example-basic --rebuild` verifies a byte-identical rebuild.
 
 ## Hooks
 

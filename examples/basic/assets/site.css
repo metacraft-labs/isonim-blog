@@ -1,0 +1,6 @@
+:root {
+  color-scheme: light dark;
+}
+.draft-banner {
+  border: 1px solid currentColor;
+}

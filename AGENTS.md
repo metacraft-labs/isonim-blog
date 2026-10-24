@@ -1,29 +1,35 @@
 # isonim-blog contributor and agent guide
 
-This public repository bootstraps a static-blog framework on IsoNim. The CLI
-currently implements `--help` and `--version`; site generation is not available.
+This public repository is a static-blog framework on IsoNim. The CLI
+implements `build` (see `docs/users/building-a-site.md`), `--help` and
+`--version`; feeds, archives, images, `serve`, `new` and themes are later work.
 
 Enter this repository's `nix develop` shell before running commands:
 
 ```sh
 just build       # typed Reprobuild CLI compile
-just test        # all bootstrap tests, compiled and run on C and JavaScript
+just test        # every suite on C, plus the backend-independent ones on JavaScript
 just lint        # Nim, Nix, shell, workflow and license checks
 just pre-commit  # the shared hook set, plus repository checks
 just fmt         # format Nim, Nix and shell sources
-nix build        # CLI package, with sandboxed C and JavaScript tests
+nix build        # CLI package, with every suite run in the sandbox
+just nix-build   # the package plus the sandboxed site-builder checks
 ```
 
-Run the complete bootstrap suite during development and before every push.
-It contains four small cases on each backend; no browser or server is needed.
-At seed `35f721b8` plus the bootstrap changes, `just test` took 36 seconds on
-Linux after provider compilation; the first recipe compilation takes minutes.
+Run the complete suite during development and before every push: five suites
+(17 cases) on C, and the two backend-independent suites (9 cases) on
+JavaScript too. The site suites compile real site programs with the real Nim
+compiler; no browser or server is needed.
+On Linux x86_64, with the site-model changes on top of `c8bfe2f2`, a cold
+`repro test` (fresh action cache, provider already compiled) took 339 seconds
+on 2026-10-25; unchanged edges are reused on later runs.
 `just test` delegates to `repro test`; use its recorded history when available
 to investigate failures. Record measured timings with the tested revision.
 
-`src/isonim_blog.nim` is the library entry point, `src/isonim_blog_cli.nim`
-owns process I/O, and `tests/test_plumbing.nim` exercises the real dependencies
-and command interface. `config.nims` chooses sibling sources for development
+`src/isonim_blog.nim` is the library entry point and `src/isonim_blog_cli.nim`
+owns process I/O. The development notes map the remaining modules. Tests use
+the generic `examples/basic/` site; never add personal or private content.
+`config.nims` chooses sibling sources for development
 and locked Nix inputs for standalone and sandboxed builds. See
 [development notes](docs/contributors/development.md) for source selection.
 

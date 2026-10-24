@@ -1,0 +1,12 @@
+title = "Field Notes"
+description = "A small technical notebook"
+url = "https://example.org"
+language = "en"
+timezone = "UTC"
+author = { name = "Example Author", url = "/about/" }
+custom = { enabled = true, nested = ["one", "two"] }
+[collections.notes]
+output = true
+permalink = "/notes/:slug/"
+[output]
+scripts = "none"

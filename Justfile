@@ -19,8 +19,9 @@ lint:
 lint-checks:
     bash scripts/check-license.sh
     nim check src/isonim_blog_cli.nim
-    nim check tests/test_plumbing.nim
-    nixfmt --check flake.nix
+    nim check src/isonim_blog_prepare.nim
+    for suite in tests/test_*.nim; do nim check "$suite"; done
+    nixfmt --check flake.nix nix/site.nix
     shellcheck scripts/*.sh
     shfmt -d scripts/*.sh
     actionlint
@@ -31,11 +32,16 @@ pre-commit:
 
 fmt:
     nimpretty src/*.nim src/isonim_blog/*.nim tests/*.nim
-    nixfmt flake.nix
+    nixfmt flake.nix nix/site.nix
     shfmt -w scripts/*.sh
 
+# The package (with every suite in the sandbox) and the site-builder checks.
 nix-build:
     @mkdir -p test-logs
-    nix build --print-build-logs .#default 2>&1 | tee test-logs/nix-build.log
+    system="$(nix eval --raw --impure --expr builtins.currentSystem)"; \
+    nix build --print-build-logs .#default \
+        ".#checks.$system.example-basic" \
+        ".#checks.$system.build-site-contract" \
+        ".#checks.$system.build-site-islands" 2>&1 | tee test-logs/nix-build.log
 
 alias t := test
