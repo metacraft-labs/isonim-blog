@@ -6,3 +6,13 @@
 /result
 /result-*
 *.ct
+# A direct `nim c -r tests/<suite>.nim` (or `nim js -r`) writes its binary
+# beside the source. Only suffix-free names and .exe/.js outputs are ignored,
+# so sources such as tests/test_*.nim and fixture data stay visible.
+/tests/test_*
+!/tests/test_*.*
+/tests/test_*.exe
+/tests/test_*.js
+# The README's example build writes its cache and output beside the site.
+/examples/*/build/
+/examples/*/public/
