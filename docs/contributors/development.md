@@ -1,9 +1,9 @@
 # Development
 
 The repository supplies the site model and the `build` command described in
-[Building a site](../users/building-a-site.md), including archives, feeds and
-the sitemap. Images, the preview server, scaffolding and packaged themes are
-not implemented yet.
+[Building a site](../users/building-a-site.md), including archives, feeds,
+the sitemap, responsive images and OpenGraph images. The preview server,
+scaffolding and packaged themes are not implemented yet.
 Start with the commands in [AGENTS.md](../../AGENTS.md).
 
 ## Source map

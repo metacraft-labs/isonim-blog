@@ -66,6 +66,11 @@
             ISONIM_BLOG_NIM_EVERYWHERE_SRC = "${inputs.nim-everywhere}";
             ISONIM_BLOG_PYTHON = "${pkgs.python3}/bin/python3";
             PYTHONTZPATH = "${pkgs.tzdata}/share/zoneinfo";
+            # Image variants (libvips) and OpenGraph images (resvg with the
+            # bundled DejaVu fonts), injected by path.
+            ISONIM_BLOG_VIPS = pkgs.lib.getExe' pkgs.vips "vips";
+            ISONIM_BLOG_RESVG = pkgs.lib.getExe pkgs.resvg;
+            ISONIM_BLOG_OG_FONTS = "${pkgs.dejavu_fonts}/share/fonts/truetype";
           };
           cli = pkgs.stdenv.mkDerivation (
             sources
@@ -102,7 +107,7 @@
               checkPhase = ''
                 runHook preCheck
                 export HOME="$TMPDIR"
-                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds; do
+                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds test_static_images test_static_ogimage; do
                   nim c -r --out:build/tests/$suite --nimcache:build/nimcache/$suite tests/$suite.nim
                 done
                 for suite in test_plumbing test_model_pure; do
@@ -123,6 +128,9 @@
                   --set ISONIM_BLOG_PYTHON ${pkgs.python3}/bin/python3 \
                   --set-default ISONIM_BLOG_REVISION ${self.rev or self.dirtyRev or "unknown"} \
                   --set-default PYTHONTZPATH ${pkgs.tzdata}/share/zoneinfo \
+                  --set ISONIM_BLOG_VIPS ${sources.ISONIM_BLOG_VIPS} \
+                  --set ISONIM_BLOG_RESVG ${sources.ISONIM_BLOG_RESVG} \
+                  --set ISONIM_BLOG_OG_FONTS ${sources.ISONIM_BLOG_OG_FONTS} \
                   --prefix PATH : ${
                     pkgs.lib.makeBinPath [
                       pkgs.nim

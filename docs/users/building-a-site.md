@@ -18,10 +18,11 @@ my-blog/
 ├── includes/             # partial modules (*.nim) that layouts import
 ├── data/                 # *.toml and *.json, available as site.data
 ├── assets/               # fingerprinted files referenced by content and layouts
-└── static/               # copied verbatim to the output root (_headers, favicon.ico, ...)
+├── static/               # copied verbatim to the output root (_headers, favicon.ico, ...)
+└── og.svg.nim            # optional: the OpenGraph image template
 ```
 
-Only `site.toml` and these directories are read. Anything else in the
+Only `site.toml`, `og.svg.nim` and these directories are read. Anything else in the
 repository (a README, documentation, design archives, tests) is never read or
 published, so nothing needs excluding. Symbolic links inside the input
 directories are refused rather than followed.
@@ -74,6 +75,11 @@ atom = "/atom.xml"
 per_tag = true                        # an Atom feed per tag page
 full_content = true                   # false: the excerpt only
 
+[images]
+widths = [480, 960, 1600]             # variant widths, in pixels
+formats = ["avif", "webp"]            # variant formats: "avif" and/or "webp"
+max_source_bytes = 2_000_000          # a larger image is an error
+
 [output]
 scripts = "none"                      # "none" (default) or "islands"
 analytics = { provider = "none" }     # "none", "custom" (snippet = "...") or "beacon" (src = "...")
@@ -84,7 +90,7 @@ language is accepted. Unknown top-level keys are kept in `site.extra`, and
 unknown keys inside the tables above stay in those tables (`site.config.feeds`,
 `site.config.archives`, `site.config.output`, a collection's `extra`), so a
 layout can read settings this version does not interpret. The values shown are
-the defaults for `[taxonomies]`, `[archives]` and `[feeds]`. TOML values with no JSON equivalent arrive as
+the defaults for `[taxonomies]`, `[archives]`, `[feeds]` and `[images]`. TOML values with no JSON equivalent arrive as
 tagged objects: `{"$toml": "datetime" | "date" | "time", "value": "<ISO 8601>"}`,
 `{"$toml": "integer", "value": "<digits>"}` for integers beyond 2^53, and
 `{"$toml": "float", "value": "nan" | "inf" | "-inf"}`. A table that itself has
@@ -193,6 +199,63 @@ both. Pointing `index` at `/` makes the post index the home page (remove
 
 All three need absolute URLs, so a build without `url` (in `site.toml` or
 from `--url`) fails.
+
+## Images and OpenGraph images
+
+Every `<img>` on a built page, from Markdown or from a layout, is checked and
+served responsively:
+
+- It gets `width` and `height` from the image file itself (a JPEG's Exif
+  orientation is taken into account), so the page does not shift while it
+  loads. An `<img>` that already has both keeps them; one given dimension
+  scales the other.
+- A PNG, JPEG, WebP or AVIF (one still frame) becomes a `<picture>` with one
+  `<source srcset>` per format in `[images] formats`, at each width in
+  `[images] widths` below the image's own width, plus its own width when a
+  configured width reaches it: an image is never enlarged. `sizes` says the
+  image is at most its own width. The original stays the `<img src>`
+  fallback. Variants are fingerprinted under `assets/`, with metadata
+  removed.
+- SVGs pass through unchanged (with their declared size when they have one),
+  and so do GIFs and animated images, which resizing would freeze.
+- The first image of a page loads normally; every later one gets
+  `loading="lazy"`.
+- An image without alt text, one larger than `[images] max_source_bytes`, or
+  a site path that names no file is an error naming the page. An image on
+  another site keeps its markup, with a warning that it has no dimensions.
+
+Every page also gets an OpenGraph image: a 1200x630 PNG referenced by
+`og:image` and `twitter:image`, with a `summary_large_image` Twitter card.
+It is rendered from an SVG template with [resvg](https://github.com/linebender/resvg)
+and the bundled DejaVu fonts; the fonts installed on the machine are never
+used. The built-in template shows the site title, the page title and the
+post date. A site (or theme) replaces it with `og.svg.nim` at its root, a
+module exporting
+
+```nim
+import isonim_blog/[model, og]
+proc ogImage*(page: Page; site: Site): string =
+  ## The SVG of the page's card; svgText escapes text, wrapLines breaks it.
+  "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1200 630\">" &
+    "<text x=\"80\" y=\"300\" font-size=\"64\">" & svgText(page.title) & "</text></svg>"
+```
+
+The SVG must be 1.91:1 and self-contained, so a template cannot read files.
+A link (`href` under any namespace prefix, `src`, `xml:base`) must be a
+`#fragment` or a `data:` URL, and CSS (in `<style>`, CDATA included, in a
+`style` attribute or in any attribute's `url(...)`) may name only `#fragment`s;
+anything else fails the build, as do `@import`, CSS escapes, a `<!DOCTYPE>`
+(and with it any entity) and processing instructions such as
+`<?xml-stylesheet?>`. A leading `<?xml ...?>` declaration is fine. Text uses the bundled DejaVu families; `serif`, `sans-serif` and
+`monospace` mean DejaVu Sans. A page's `og_image` replaces its card: a URL, or
+a file of the site named relative to the page's source (a file in a post
+bundle) or to the site root.
+
+The tools come from the Nix dev shell, the packaged CLI and `buildSite`, by
+path: libvips (`ISONIM_BLOG_VIPS`), resvg (`ISONIM_BLOG_RESVG`) and the font
+directory (`ISONIM_BLOG_OG_FONTS`). Both run with fixed settings, so the same
+inputs give the same bytes; `isonim-blog build` keeps encoded variants under
+`build/isonim-blog/images/` and reuses them.
 
 ## Zero JavaScript by default
 

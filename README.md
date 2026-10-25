@@ -5,9 +5,9 @@ A static-blog framework being built on [IsoNim](https://github.com/metacraft-lab
 This development snapshot builds sites: posts, drafts, pages, collections,
 data and assets, rendered through layouts written as IsoNim components, with
 tag, category and year archives, a paginated post index, RSS and Atom feeds,
-a sitemap and JSON-LD metadata, zero JavaScript by default and
-byte-reproducible Nix builds. Images, the preview server, project scaffolding
-and packaged themes are not available yet. See
+a sitemap and JSON-LD metadata, responsive images and generated OpenGraph
+images, zero JavaScript by default and byte-reproducible Nix builds. The
+preview server, project scaffolding and packaged themes are not available yet. See
 [Building a site](docs/users/building-a-site.md).
 
 With Nix installed, build the CLI and the example site:

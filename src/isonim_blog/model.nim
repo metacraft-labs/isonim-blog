@@ -26,6 +26,9 @@ type
       ## One page per term (`[taxonomies]`); "" turns one off.
     rssPath*, atomPath*: string  ## Feed files (`[feeds]`); "" turns one off.
     perTagFeeds*, fullContentFeeds*: bool
+    imageWidths*: seq[int]     ## `[images] widths`: variant widths in pixels.
+    imageFormats*: seq[string] ## `[images] formats`: "avif" and/or "webp".
+    maxImageBytes*: int        ## `[images] max_source_bytes`: larger is an error.
   PageKind* = enum
     ## What produced a page: a content file, or one of the generated listings.
     pkContent, pkIndex, pkTag, pkCategory, pkYear, pkMonth
@@ -68,12 +71,15 @@ type
   BuildOptions* = object
     drafts*, future*: bool
     outDir*, url*, theme*: string
+    imageCache*: string  ## Optional directory where image variants are reused.
   Island* = object
     ## A layout declares a module in includes/ exporting
     ## `mount*(element: Element)`, with `Element` from isonim/web/dom_api.
     ## All declared modules compile into one bundle only in islands mode.
     module*, selector*: string
   LayoutProc* = proc(page: Page; site: Site; content: string): string
+  OgTemplate* = proc(page: Page; site: Site): string
+    ## Returns the SVG of a page's 1200x630 OpenGraph card (`og.svg.nim`).
   LayoutEntry* = object
     name*, parent*: string
     render*: LayoutProc
@@ -194,6 +200,33 @@ proc archivePattern(archives: JsonNode; key, default: string; required: openArra
   for name in required: values.add (name, "00")
   discard expandPattern(result, values)
 
+proc intList(node: JsonNode; key: string; default: openArray[int]): seq[int] =
+  if not node.hasKey(key): return @default
+  if node[key].kind != JArray: fail(key & " must be a list of integers")
+  for item in node[key]:
+    if item.kind != JInt or item.getInt <= 0: fail(key & " must be a list of positive integers")
+    result.add item.getInt
+
+proc parseImages(config: var SiteConfig) =
+  ## `[images]`: the widths and formats of responsive variants and the
+  ## largest source accepted. The defaults are the values in the
+  ## documented example (480, 960 and 1600 pixels; AVIF and WebP; 2 MB).
+  let images = config.images
+  config.imageWidths = images.intList("widths", [480, 960, 1600])
+  config.imageFormats = @[]
+  if images.hasKey("formats"):
+    if images["formats"].kind != JArray: fail("images.formats must be a list")
+    for item in images["formats"]:
+      if item.kind != JString or item.getStr notin ["avif", "webp"]:
+        fail("images.formats may name only \"avif\" and \"webp\"")
+      if item.getStr notin config.imageFormats: config.imageFormats.add item.getStr
+  else: config.imageFormats = @["avif", "webp"]
+  config.maxImageBytes = 2_000_000
+  if images.hasKey("max_source_bytes"):
+    if images["max_source_bytes"].kind != JInt or images["max_source_bytes"].getInt <= 0:
+      fail("images.max_source_bytes must be a positive integer")
+    config.maxImageBytes = images["max_source_bytes"].getInt
+
 proc parseConfig*(node: JsonNode): SiteConfig =
   ## Map decoded TOML without throwing away unknown top-level values.
   if node.kind != JObject: fail("site.toml must be a table")
@@ -218,6 +251,7 @@ proc parseConfig*(node: JsonNode): SiteConfig =
   result.taxonomies = node.objectValue("taxonomies")
   result.markdown = node.objectValue("markdown")
   result.images = node.objectValue("images")
+  parseImages(result)
   let output = node.objectValue("output")
   result.output = output
   result.analytics = output.objectValue("analytics")

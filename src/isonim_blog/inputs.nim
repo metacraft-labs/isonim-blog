@@ -95,9 +95,12 @@ proc readSiteConfig*(root: string): SiteConfig =
   parseConfig(decoded)
 
 proc siteInputFiles*(root: string; config: SiteConfig; options: BuildOptions): seq[string] =
-  ## Every file a build may read from the site: site.toml and the declared
-  ## directories. Nothing else in the repository can influence the output.
+  ## Every file a build may read from the site: site.toml, the OpenGraph
+  ## template og.svg.nim and the declared directories. Nothing else in the
+  ## repository can influence the output.
   result.add root / "site.toml"
+  if symlinkExists(root / "og.svg.nim"): fail("input symlinks are not supported: " & root / "og.svg.nim")
+  if fileExists(root / "og.svg.nim"): result.add root / "og.svg.nim"
   var dirs = @["posts", "pages", "data", "assets", "static", "layouts", "includes"]
   if options.drafts: dirs.add "drafts"
   for name in config.collections.keys: dirs.add "collections" / name
@@ -105,8 +108,10 @@ proc siteInputFiles*(root: string; config: SiteConfig; options: BuildOptions): s
   result.sort()
 
 proc themeTreeHash*(theme: string): string =
-  ## Identity of a path-named theme: its layouts, includes and assets.
+  ## Identity of a path-named theme: its layouts, includes, assets and
+  ## OpenGraph template.
   var files: seq[tuple[path, content: string]]
+  if fileExists(theme / "og.svg.nim"): files.add ("og.svg.nim", readFile(theme / "og.svg.nim"))
   for dir in ["layouts", "includes", "assets"]:
     for file in inputFiles(theme / dir):
       files.add (relativePath(file, theme).replace('\\', '/'), readFile(file))

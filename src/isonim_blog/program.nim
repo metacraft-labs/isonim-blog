@@ -18,6 +18,9 @@ proc resolveTheme*(root: string; explicit = ""): string =
   result = if configured.isAbsolute: configured else: root / configured
   if not dirExists(result): fail("theme path does not exist: " & configured)
 
+const ogTemplateName* = "og.svg.nim"
+  ## A theme's or site's OpenGraph template, at its root.
+
 proc prepareProgram*(root, directory: string; theme = ""): string =
   ## Copy the theme/site code overlay into an owned compilation directory.
   ## A wrapper exposes an optional private parent constant without parsing Nim.
@@ -39,6 +42,19 @@ proc prepareProgram*(root, directory: string; theme = ""): string =
       let name = key[8..^5]
       validateName(name)
       layoutNames.add name
+  # A theme's or site's OpenGraph template (the site's wins), compiled
+  # into the program as og_template.nim (`og.svg.nim` is not a module name).
+  var ogTemplate = ""
+  var hasOgTemplate = false
+  for base in [theme, root]:
+    if base.len == 0: continue
+    let path = base / ogTemplateName
+    if symlinkExists(path): fail("input symlinks are not supported: " & path)
+    if fileExists(path):
+      ogTemplate = readFile(path)
+      hasOgTemplate = true
+  if hasOgTemplate: writeChanged(directory / "og_template.nim", ogTemplate)
+  elif fileExists(directory / "og_template.nim"): removeFile(directory / "og_template.nim")
   # Deleted code must not survive in the prepared tree or satisfy an import.
   for dir in ["layouts", "includes"]:
     for old in inputFiles(directory / dir):
@@ -57,7 +73,10 @@ proc prepareProgram*(root, directory: string; theme = ""): string =
     if i > 0: program.add ","
     let prefix = "layout" & $i
     program.add "\n  LayoutEntry(name: " & $(%name) & ", parent: " & prefix & ".blogParent(), render: " & prefix & ".layout, islands: " & prefix & ".blogIslands())"
-  program.add "]\nwhen isMainModule: siteMain(layouts)\n"
+  program.add "]\n"
+  if hasOgTemplate:
+    program.add "import og_template as ogtemplate\nwhen isMainModule: siteMain(layouts, ogtemplate.ogImage)\n"
+  else: program.add "when isMainModule: siteMain(layouts)\n"
   result = directory / "site_program.nim"
   writeChanged(result, program)
 
@@ -177,4 +196,6 @@ proc buildSite*(root: string; options = BuildOptions()): string =
   if options.future: args.add "--future"
   if options.url.len > 0: args.add @["--url", options.url]
   if bundle.len > 0: args.add @["--bundle", bundle]
+  # Image variants are reused across builds of this site.
+  args.add @["--image-cache", directory / "images"]
   result.add runTool(program.path, args)

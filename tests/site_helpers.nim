@@ -1,7 +1,7 @@
 ## Real compiler/filesystem integration helpers, without test doubles.
-import std/[os, strutils, tempfiles]
+import std/[os, strutils, tempfiles, json, tables]
 import isonim_blog/[program, inputs]
-export os, strutils, tempfiles, program, inputs
+export os, strutils, tempfiles, tables, program, inputs
 const repoRoot* = currentSourcePath().parentDir.parentDir
 
 # config.nims records the dependency trees this test binary was compiled
@@ -31,3 +31,31 @@ proc compileSite*(root: string): string =
 
 proc runSite*(binary, root, output: string; args: seq[string] = @[]): string =
   runTool(binary, @[output, "--root", root] & args)
+
+const htmlReader = """
+import json, sys
+from html.parser import HTMLParser
+class Reader(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.found = []
+    def handle_starttag(self, tag, attrs):
+        if tag in sys.argv[2:]:
+            item = {name: (value if value is not None else "") for name, value in attrs}
+            item["<tag>"] = tag
+            self.found.append(item)
+    handle_startendtag = handle_starttag
+reader = Reader()
+with open(sys.argv[1], encoding="utf-8") as page:
+    reader.feed(page.read())
+print(json.dumps(reader.found))
+"""
+
+proc htmlElements*(file: string; tags: varargs[string]): seq[Table[string, string]] =
+  ## The start tags named `tags` in a built page, in document order, with
+  ## their attributes decoded: read by Python's standard `html.parser`, an
+  ## independent HTML tokenizer, not by the code that wrote the page.
+  for item in parseJson(runPython(@["-c", htmlReader, file] & @tags)):
+    var element = initTable[string, string]()
+    for key, value in item: element[key] = value.getStr
+    result.add element

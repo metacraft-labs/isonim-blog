@@ -6,7 +6,8 @@
 # IsoNim and runs it in the sandbox with SOURCE_DATE_EPOCH set. Here the
 # exporter is the site's generated layout program:
 #
-# 1. `prepared` copies only `site.toml` and the declared site directories
+# 1. `prepared` copies only `site.toml`, the OpenGraph template `og.svg.nim`
+#    and the declared site directories
 #    (nothing else in the source can reach the build) and generates the
 #    layout program with the same `isonim-blog-prepare` the CLI uses.
 # 2. The shared builder performs the single native compile. Its own run of
@@ -49,6 +50,7 @@ let
   prepared = pkgs.runCommand "isonim-blog-prepared" { nativeBuildInputs = [ cli ]; } ''
     mkdir -p "$out"
     cp ${src}/site.toml "$out/site.toml"
+    if [ -f ${src}/og.svg.nim ]; then cp ${src}/og.svg.nim "$out/og.svg.nim"; fi
     for dir in posts drafts pages collections layouts includes data assets static; do
       if [ -d ${src}/"$dir" ]; then cp -R ${src}/"$dir" "$out/"; fi
     done
@@ -58,6 +60,8 @@ let
   buildStaticSite = import "${inputs.isonim}/nix/static-site.nix" {
     inherit (pkgs) lib stdenv nim;
     isonimSrc = inputs.isonim;
+    # The builder puts IsoNim's platform sources on the exporter's path too.
+    nimEverywhereSrc = inputs.nim-everywhere;
   };
   exportArgs =
     lib.optionals (themeSrc != null) [
@@ -84,6 +88,9 @@ buildStaticSite {
   env = {
     ISONIM_BLOG_PYTHON = python;
     PYTHONTZPATH = "${pkgs.tzdata}/share/zoneinfo";
+    ISONIM_BLOG_VIPS = lib.getExe' pkgs.vips "vips";
+    ISONIM_BLOG_RESVG = lib.getExe pkgs.resvg;
+    ISONIM_BLOG_OG_FONTS = "${pkgs.dejavu_fonts}/share/fonts/truetype";
     ISONIM_BLOG_REVISION = self.rev or self.dirtyRev or "unknown";
     postBuild = ''
       bundle_args=()

@@ -1,8 +1,8 @@
 ## Content-only execution of a compiled site's layout registry.
-import std/[os, strutils, json, tables, sets, algorithm]
-import ./[model, inputs, version, html_checks, archives, listing, syndication]
+import std/[os, strutils, json, tables, sets, algorithm, uri]
+import ./[model, inputs, version, html_checks, archives, listing, syndication, og]
 import isonim/content/[markdown, prose]
-import isonim/static/[exporter, buildinfo, assets, head, csp, sitemap, robots]
+import isonim/static/[exporter, buildinfo, assets, head, csp, sitemap, robots, ogimage]
 import isonim/dsl/ui
 import isonim/ssr/escape
 export model, listing
@@ -62,8 +62,48 @@ proc validateOutput(root, output: string) =
     let input = source / dir
     if target == input or target.startsWith(input & DirSep): fail("output overlaps input directory " & dir)
 
+proc ogImageConfig(): OgImageConfig =
+  ## resvg and the bundled fonts, injected by path: the dev shell, the
+  ## packaged CLI and the Nix builder set these; nothing is looked up.
+  result.resvgPath = getEnv("ISONIM_BLOG_RESVG")
+  if result.resvgPath.len == 0:
+    fail("OpenGraph images need resvg: ISONIM_BLOG_RESVG is not set (enter nix develop or use the packaged CLI)")
+  let fonts = getEnv("ISONIM_BLOG_OG_FONTS")
+  if fonts.len == 0 or not dirExists(fonts):
+    fail("OpenGraph images need the bundled fonts: ISONIM_BLOG_OG_FONTS is not a directory (enter nix develop or use the packaged CLI)")
+  for kind, file in walkDir(fonts):
+    if kind in {pcFile, pcLinkToFile} and file.splitFile.ext.toLowerAscii in [".ttf", ".otf"]:
+      result.fontFiles.add file
+  result.fontFiles.sort()
+  if result.fontFiles.len == 0: fail("no .ttf or .otf font in ISONIM_BLOG_OG_FONTS: " & fonts)
+  result.defaultFontFamily = "DejaVu Sans"
+
+proc ogImagePath(site: Site; url, png: string): string =
+  ## `assets/og/<page path>.<hash>.png`: fingerprinted like other assets,
+  ## named after the page so the tree stays readable.
+  var key = url[site.config.basePath.len .. ^1].strip(chars = {'/'})
+  if key.endsWith(".html"): key.setLen(key.len - 5)
+  if key.len == 0: key = "index"
+  hashedAssetName("assets/og/" & key & ".png", png)
+
+proc referencePath(pageUrl, reference: string): string =
+  ## The site path a page-relative or root-relative reference names, without
+  ## its query or fragment and percent-decoded; "" for a URL with a scheme
+  ## or another host (`https:`, `data:`, `//host/`).
+  let value = reference.strip()
+  if value.len == 0 or value.startsWith("//"): return ""
+  for c in value:
+    if c == ':': return ""
+    if c in {'/', '?', '#'}: break
+  const origin = "http://site.invalid"
+  var path = resolveUrl(origin & pageUrl, value)[origin.len .. ^1]
+  for mark in ['?', '#']:
+    let at = path.find(mark)
+    if at >= 0: path.setLen(at)
+  decodeUrl(path, decodePlus = false)
+
 proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
-    options = BuildOptions(); bundle = ""): ExportReport =
+    options = BuildOptions(); bundle = ""; ogTemplate: OgTemplate = defaultOgImage): ExportReport =
   ## Prepare all output using shared primitives and publish one complete tree.
   validateOutput(root, output)
   var site = loadSite(root, options)
@@ -73,6 +113,8 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   var origins = initTable[string, string]()
   var assetManifest: seq[tuple[original, hashed: string]]
   var rewrites: seq[tuple[original, hashed: string]]
+  # Every file a page may show as an image, by the URL pages use for it.
+  var siteFiles = initTable[string, tuple[name, content: string]]()
   proc addFile(path, content, source: string) =
     let key = path.toLowerAscii
     if origins.hasKey(key): fail("output collision: " & origins[key] & " and " & source & " -> " & path)
@@ -84,6 +126,7 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     assetManifest.add (path, hashed)
     rewrites.add ("/" & path, site.config.basePath & "/" & hashed)
     site.assets[path] = site.config.basePath & "/" & hashed
+    siteFiles[site.config.basePath & "/" & hashed] = (path, content)
   # A theme's assets sit under the site's: the site's file of the same path wins.
   var assetSources = initOrderedTable[string, string]()
   for base in [options.theme, root]:
@@ -105,7 +148,10 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
         if file.endsWith(".md"): continue
         addAsset(relativePath(file, root), readFile(file), relativePath(file, root))
   for file in inputFiles(root / "static"):
-    addFile(relativePath(file, root / "static"), readFile(file), relativePath(file, root))
+    let path = relativePath(file, root / "static").replace('\\', '/')
+    let content = readFile(file)
+    addFile(path, content, relativePath(file, root))
+    siteFiles[site.config.basePath & "/" & path] = (path, content)
   addFile("asset-manifest.json", renderAssetManifest(assetManifest), "generated asset manifest")
   var scripts: seq[PageScript]
   if site.config.scriptPolicy == spDeclared and declaredIslands(layouts).len > 0:
@@ -154,6 +200,39 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   # layouts and feeds see each post's content and excerpt; linkNavigation
   # also copies the links onto the matching records of site.pages.
   linkNavigation(site)
+  # Responsive images: every page's <img> elements, Markdown and layouts
+  # alike, get dimensions; rasters get AVIF/WebP variants (libvips, injected).
+  var imageFormats: seq[ImageFormat]
+  for name in site.config.imageFormats: imageFormats.add parseImageFormat(name)
+  let basePath = site.config.basePath
+  let images = newResponsiveImages(ImageVariantConfig(vipsPath: getEnv("ISONIM_BLOG_VIPS"),
+    widths: site.config.imageWidths, formats: imageFormats,
+    maxSourceBytes: site.config.maxImageBytes, cacheDir: options.imageCache),
+    proc(path: string): string = basePath & "/" & path)
+  var ogConfig: OgImageConfig
+  var ogConfigured = false
+  proc ogImageUrl(page: Page): string =
+    ## The absolute URL of the page's OpenGraph image: its `og_image` (a URL,
+    ## or a file of the site named relative to the page's source or to the
+    ## site root), else a card rendered from the template.
+    let value = page.ogImage.strip()
+    if value.len > 0:
+      let lower = value.toLowerAscii
+      if lower.startsWith("https://") or lower.startsWith("http://"): return value
+      let path = referencePath("/" & page.source, value)
+      for rewrite in rewrites:
+        if rewrite.original == path: return site.config.url & rewrite.hashed
+      if siteFiles.hasKey(basePath & path): return site.config.url & basePath & path
+      fail(page.source & ": og_image " & value & " is not a file of the site")
+    if not ogConfigured:
+      ogConfig = ogImageConfig()
+      ogConfigured = true
+    let png =
+      try: renderOgImage(ogTemplate(page, site), ogConfig)
+      except OgImageError as cause: fail(page.source & ": OpenGraph image: " & cause.msg)
+    let path = ogImagePath(site, page.url, png)
+    addFile(path, png, "OpenGraph image of " & page.source)
+    site.config.url & basePath & "/" & path
   var pages: seq[SitePage]
   var headers = ""
   for page in site.pages & generatedPages(site):
@@ -167,7 +246,7 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
       description: page.description, siteName: site.config.title,
       canonicalUrl: if page.canonical.len > 0: page.canonical else: site.config.url & page.url,
       ogType: if isPost: "article" else: "website",
-      ogImage: page.ogImage)
+      ogImage: ogImageUrl(page), twitterCard: "summary_large_image")
     documentHead.jsonLd = jsonLdFor(site, page, documentHead.canonicalUrl)
     let bodyHtml = applyLayouts(page, site, layouts)
     let headHtml = renderPageHeadHtml(documentHead, keptScripts, policy = site.config.scriptPolicy)
@@ -180,7 +259,19 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
         body:
           raw bodyHtml
           raw ending
-    let document = "<!doctype html>\n" & markup
+    let pageUrl = page.url
+    let document =
+      try:
+        images.rewritePageImages("<!doctype html>\n" & markup, page.source,
+          proc(src: string): ImageReference =
+            let path = referencePath(pageUrl, src)
+            if path.len == 0: ImageReference(kind: irExternal)
+            elif siteFiles.hasKey(path):
+              ImageReference(kind: irFile, name: siteFiles[path].name, content: siteFiles[path].content)
+            else: ImageReference(kind: irMissing))
+      except ImageError as cause:
+        fail(cause.msg & (if "not configured" in cause.msg:
+          " (ISONIM_BLOG_VIPS is not set: enter nix develop or use the packaged CLI)" else: ""))
     var actualScripts = 0
     for script in scriptElements(document):
       if script.attr("type").toLowerAscii != "application/ld+json": inc actualScripts
@@ -201,6 +292,8 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     # that lists only such posts.
     pages.add SitePage(route: page.url, html: document, lastmod: page.updated,
       noindex: page.noindex or page.future or page.listsOnlyPreviews)
+  for file in images.files: addFile(file.path, file.content, "image variant")
+  site.warnings.add images.warnings
   for (path, content) in siteFeeds(site): addFile(path[1..^1], content, "generated feed " & path)
   let sitemapPath = site.config.basePath & "/sitemap.xml"
   addFile(sitemapPath[1..^1], renderSitemap(sitemapEntriesFor(pages, site.config.url)), "generated sitemap")
@@ -242,7 +335,7 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     raise
   for warning in site.warnings: stderr.writeLine("warning: " & warning)
 
-proc siteMain*(layouts: openArray[LayoutEntry]) =
+proc siteMain*(layouts: openArray[LayoutEntry]; ogTemplate: OgTemplate = defaultOgImage) =
   ## Generated exporter protocol: output directory, then site root and options.
   try:
     let args = commandLineParams()
@@ -261,7 +354,7 @@ proc siteMain*(layouts: openArray[LayoutEntry]) =
       case args[i]
       of "--drafts": options.drafts = true
       of "--future": options.future = true
-      of "--root", "--url", "--bundle", "--theme":
+      of "--root", "--url", "--bundle", "--theme", "--image-cache":
         let flag = args[i]
         inc i
         if i >= args.len: fail("missing value for " & flag)
@@ -269,10 +362,11 @@ proc siteMain*(layouts: openArray[LayoutEntry]) =
         of "--root": root = args[i]
         of "--url": options.url = args[i]
         of "--theme": options.theme = absolutePath(args[i])
+        of "--image-cache": options.imageCache = absolutePath(args[i])
         else: bundle = args[i]
       else: fail("unknown exporter argument " & args[i])
       inc i
-    let report = exportBlog(root, args[0], layouts, options, bundle)
+    let report = exportBlog(root, args[0], layouts, options, bundle, ogTemplate)
     echo "Built " & $report.pages.len & " pages and " & $report.files.len & " files in " & args[0]
   except CatchableError as cause:
     stderr.writeLine(cause.msg)

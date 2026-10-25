@@ -2,8 +2,8 @@
 
 This public repository is a static-blog framework on IsoNim. The CLI
 implements `build` (see `docs/users/building-a-site.md`), `--help` and
-`--version`, with archives, feeds and the sitemap; images, `serve`, `new` and
-themes are later work.
+`--version`, with archives, feeds, the sitemap, responsive images and
+OpenGraph images; `serve`, `new` and themes are later work.
 
 Enter this repository's `nix develop` shell before running commands:
 
@@ -17,10 +17,11 @@ nix build        # CLI package, with every suite run in the sandbox
 just nix-build   # the package plus the sandboxed site-builder checks
 ```
 
-Run the complete suite during development and before every push: seven suites
-(30 cases) on C, and the two backend-independent suites (12 cases) on
+Run the complete suite during development and before every push: nine suites
+(39 cases) on C, and the two backend-independent suites (12 cases) on
 JavaScript too. The site suites compile real site programs with the real Nim
-compiler; no browser or server is needed.
+compiler; no browser or server is needed. The image and OpenGraph suites run
+the libvips and resvg the dev shell provides.
 On Linux x86_64, with the site-model changes on top of `c8bfe2f2`, a cold
 `repro test` (fresh action cache, provider already compiled) took 339 seconds
 on 2026-10-25; unchanged edges are reused on later runs.
