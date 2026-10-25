@@ -65,6 +65,14 @@ suite "site model":
         check cause.msg.contains("first.md")
         check cause.msg.contains("second.md")
 
+  test "redirect_from entries are literal site paths under the base path":
+    check redirectSource("", "/2019/old-post.html") == "/2019/old-post.html"
+    check redirectSource("", "/old/moved/") == "/old/moved/"
+    check redirectSource("/journal", "/old") == "/journal/old"
+    for bad in ["", "old", "//host/x", "/a b", "/a?b", "/a#b", "/a/*", "/:slug/", "/%20",
+        "/a/../b", "/./a", "/a//b", "/a\\b", "/!x"]:
+      expect BlogError: discard redirectSource("", bad)
+
   test "ordering is date descending then slug ascending":
     var pages = @[Page(slug: "b", date: "2020-01-01"), Page(slug: "z", date: "2021-01-01"), Page(slug: "a", date: "2020-01-01")]
     pages.sortPages()

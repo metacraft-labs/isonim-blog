@@ -72,6 +72,10 @@ type
     drafts*, future*: bool
     outDir*, url*, theme*: string
     imageCache*: string  ## Optional directory where image variants are reused.
+    incremental*: bool
+      ## Update the output in place, writing only files whose bytes changed
+      ## and removing files the build no longer produces (`serve`), instead
+      ## of replacing the whole directory.
   Island* = object
     ## A layout declares a module in includes/ exporting
     ## `mount*(element: Element)`, with `Element` from isonim/web/dom_api.
@@ -123,6 +127,21 @@ proc cleanRoute*(route: string): string =
   if decoded != route: fail("permalinks use literal URL path characters, not percent escapes: " & route)
   if route == "/" or route.endsWith("/") or route.endsWith(".html"): route
   else: route & "/"
+
+proc redirectSource*(basePath, value: string): string =
+  ## A `redirect_from` entry as a `_redirects` source: a literal site path
+  ## (the old URL, kept exactly, with or without a trailing slash) under the
+  ## base path. Placeholders, splats, queries, fragments, whitespace and
+  ## percent escapes are refused, so every entry is one static rule.
+  if value.len == 0 or value[0] != '/' or value.startsWith("//"):
+    fail("redirect_from must be a site path starting with one slash: " & value)
+  if value.contains({'\\', '?', '#', '*', ':', '%', '!', '\0'..' ', '\x7f'}):
+    fail("invalid character in redirect_from: " & value)
+  let parts = value[1..^1].split('/')
+  for i, part in parts:
+    if part in [".", ".."] or (part.len == 0 and i < parts.high):
+      fail("unsafe redirect_from segment: " & value)
+  basePath & value
 
 proc outputPath*(route: string): string =
   let value = cleanRoute(route)

@@ -13,12 +13,15 @@ suite "bootstrap plumbing":
     labels[toNative("title")] = escapeHtml("A <small> & useful blog")
     check labels[toNative("title")] == "A &lt;small&gt; &amp; useful blog"
 
-  test "help describes only the available commands":
+  test "help describes the available commands":
     let response = runCli(["--help"])
     check response.exitCode == 0
     check response.error == ""
     check response.output.contains("--version")
-    check response.output.contains("build [--drafts] [--future]")
+    for command in ["new site <dir>", "new post", "new page <path>", "publish-draft <slug>",
+        "serve [--drafts] [--future] [--port 4000] [--lan]", "build [--drafts] [--future]",
+        "check [--external]", "--deploy cloudflare-pages"]:
+      check response.output.contains(command)
     check runCli(newSeq[string]()).output == response.output
 
   test "version comes from the package manifest":
@@ -28,7 +31,8 @@ suite "bootstrap plumbing":
     check response.exitCode == 0
 
   test "unsupported and extra arguments fail without pretending to build":
-    for args in [@["build", "extra"], @["build", "--out"], @["--version", "extra"], @["--unknown"]]:
+    for args in [@["build", "extra"], @["build", "--out"], @["--version", "extra"], @["--unknown"],
+        @["new"], @["new", "theme"], @["publish-draft"], @["check", "--all"]]:
       let response = runCli(args)
       check response.exitCode == 1
       check response.output == ""

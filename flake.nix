@@ -71,6 +71,8 @@
             ISONIM_BLOG_VIPS = pkgs.lib.getExe' pkgs.vips "vips";
             ISONIM_BLOG_RESVG = pkgs.lib.getExe pkgs.resvg;
             ISONIM_BLOG_OG_FONTS = "${pkgs.dejavu_fonts}/share/fonts/truetype";
+            # `check --external` requests external links with curl.
+            ISONIM_BLOG_CURL = pkgs.lib.getExe pkgs.curl;
           };
           cli = pkgs.stdenv.mkDerivation (
             sources
@@ -103,11 +105,14 @@
               '';
               doCheck = true;
               # Every suite runs here too: the site suites compile real site
-              # programs against the locked inputs, with no network.
+              # programs against the locked inputs, with no network. Two suites
+              # cannot: test_cli_scaffold and test_deploy_recipe build a generated
+              # site flake with `nix build`, which needs the Nix daemon; `just test`
+              # runs them.
               checkPhase = ''
                 runHook preCheck
                 export HOME="$TMPDIR"
-                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds test_static_images test_static_ogimage; do
+                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds test_static_images test_static_ogimage test_check test_serve_reload; do
                   nim c -r --out:build/tests/$suite --nimcache:build/nimcache/$suite tests/$suite.nim
                 done
                 for suite in test_plumbing test_model_pure; do
@@ -131,6 +136,7 @@
                   --set ISONIM_BLOG_VIPS ${sources.ISONIM_BLOG_VIPS} \
                   --set ISONIM_BLOG_RESVG ${sources.ISONIM_BLOG_RESVG} \
                   --set ISONIM_BLOG_OG_FONTS ${sources.ISONIM_BLOG_OG_FONTS} \
+                  --set ISONIM_BLOG_CURL ${sources.ISONIM_BLOG_CURL} \
                   --prefix PATH : ${
                     pkgs.lib.makeBinPath [
                       pkgs.nim

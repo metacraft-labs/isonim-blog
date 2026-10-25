@@ -1,0 +1,163 @@
+## `isonim-blog serve` end to end: this checkout's CLI, compiled by the test
+## and run as a real server process on a free loopback port over a copy of the
+## generic fixture site, driven by real file edits. The test talks to it as a
+## browser does: HTTP requests for pages and an RFC 6455 WebSocket for live
+## reload (the client below performs the real handshake and reads real
+## frames). No test doubles.
+import std/[unittest, net, base64, httpclient, times, monotimes, random]
+import isonim_blog
+import isonim/static/buildinfo
+import isonim/server/static_dist_dev_server
+import ./site_helpers
+
+proc freePort(): int =
+  ## A port the kernel just handed out; the server binds it right after.
+  let socket = newSocket()
+  socket.bindAddr(Port(0), "127.0.0.1")
+  result = socket.getLocalAddr()[1].int
+  socket.close()
+
+proc get(port: int; path: string): tuple[status: int, body: string] =
+  let client = newHttpClient(timeout = 10_000)
+  defer: client.close()
+  let response = client.request("http://127.0.0.1:" & $port & path)
+  (response.code.int, response.body)
+
+type LiveReload = object
+  socket: Socket
+
+proc connectLiveReload(port: int): LiveReload =
+  ## Open the page's live-reload WebSocket and check the server's handshake
+  ## answer (RFC 6455 §4.2.2: Sec-WebSocket-Accept from the client key).
+  var raw = newString(16)
+  for c in raw.mitems: c = char(rand(255))
+  let key = base64.encode(raw)
+  result.socket = newSocket()
+  result.socket.connect("127.0.0.1", Port(port), timeout = 10_000)
+  result.socket.send("GET /__isonim_livereload HTTP/1.1\r\nHost: 127.0.0.1:" & $port &
+    "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: " & key &
+    "\r\nSec-WebSocket-Version: 13\r\n\r\n")
+  var response = ""
+  while not response.endsWith("\r\n\r\n"):
+    response.add result.socket.recv(1, timeout = 10_000)
+  doAssert response.startsWith("HTTP/1.1 101"), response
+  doAssert ("Sec-WebSocket-Accept: " & wsAcceptKey(key)) in response, response
+
+proc nextMessage(live: LiveReload; timeoutMs: int): string =
+  ## The next text frame's payload, or "" when none arrives in time.
+  try:
+    let header = live.socket.recv(2, timeout = timeoutMs)
+    if header.len < 2: return ""
+    doAssert header[0] == chr(0x81), "expected one unmasked text frame"
+    let length = header[1].ord
+    doAssert length < 126, "unexpectedly long frame"
+    live.socket.recv(length, timeout = 10_000)
+  except TimeoutError: ""
+
+proc waitFor(condition: proc(): bool; seconds: int): bool =
+  let deadline = getMonoTime() + initDuration(seconds = seconds)
+  while getMonoTime() < deadline:
+    if condition(): return true
+    sleep(200)
+  false
+
+suite "serve":
+  test "a post edit reloads once without a recompile; a layout edit recompiles; a broken layout shows the overlay and recovers":
+    randomize()
+    let work = createTempDir("isonim-blog-serve-", "")
+    let site = work / "site"
+    copyDir(repoRoot / "examples/basic", site)
+    let cli = compileCli(work)
+    let port = freePort()
+    let env = newStringTable(modeCaseSensitive)
+    for key, value in envPairs(): env[key] = value
+    env["SOURCE_DATE_EPOCH"] = "1704067200"
+    let server = startProcess(cli, workingDir = site, args = ["serve", "--port", $port],
+      env = env, options = {poStdErrToStdOut})
+    defer:
+      server.terminate()
+      discard server.waitForExit()
+      server.close()
+      removeDir(work)
+    # The first build compiles the site program; the server answers meanwhile.
+    check waitFor(proc(): bool =
+      try: get(port, "/posts/first/").status == 200 except CatchableError: false, 300)
+    let program = site / "build/isonim-blog/bin/site-program"
+    let programHash = sha256Hex(readFile(program))
+    let programTime = getLastModificationTime(program)
+    let first = get(port, "/posts/first/")
+    check first.body.contains("/__isonim_livereload")  # the injected client
+    check not readFile(site / "public/posts/first/index.html").contains("__isonim_livereload")
+    let aboutTime = getLastModificationTime(site / "public/about/index.html")
+    let feed = readFile(site / "public/feed.xml")
+    let live = connectLiveReload(port)
+    check live.nextMessage(500) == ""  # nothing before an edit
+
+    # Content: one reload, new bytes, the same compiled program.
+    writeFile(site / "posts/2020-01-01-first.md",
+      readFile(site / "posts/2020-01-01-first.md") & "\nA freshly served sentence.\n")
+    check live.nextMessage(120_000) == "reload"
+    check live.nextMessage(2_000) == ""  # exactly one reload for one edit
+    let edited = get(port, "/posts/first/")
+    check edited.status == 200
+    check edited.body != first.body
+    check edited.body.contains("A freshly served sentence.")
+    check sha256Hex(readFile(program)) == programHash
+    check getLastModificationTime(program) == programTime
+    # Only the output the edit reaches is rewritten: the full-content feed
+    # changes, a page that shows no post content keeps its file untouched.
+    check readFile(site / "public/feed.xml") != feed
+    check readFile(site / "public/feed.xml").contains("A freshly served sentence.")
+    check getLastModificationTime(site / "public/about/index.html") == aboutTime
+
+    # A layout: recompiled and reloaded.
+    let layout = readFile(site / "layouts/post.nim")
+    writeFile(site / "layouts/post.nim", layout.replace("      raw neighbours",
+      "      raw neighbours\n      p(class = \"layout-marker\"): text \"Layout edited\""))
+    check live.nextMessage(300_000) == "reload"
+    check live.nextMessage(2_000) == ""
+    let relaid = get(port, "/posts/first/")
+    check relaid.body.contains("Layout edited")
+    check relaid.body.contains("A freshly served sentence.")
+    check sha256Hex(readFile(program)) != programHash
+    let goodProgram = sha256Hex(readFile(program))
+
+    # A broken layout: the overlay, with the compiler's message, on every page;
+    # the last good output stays on disk.
+    let published = readFile(site / "public/posts/first/index.html")
+    writeFile(site / "layouts/post.nim", "this is not Nim\n")
+    check live.nextMessage(300_000) == "reload"
+    let broken = get(port, "/posts/first/")
+    check broken.body.contains("Static export failed")
+    check broken.body.contains("post.nim")
+    check broken.body.contains("/__isonim_livereload")  # it reloads on recovery
+    check get(port, "/about/").body.contains("Static export failed")
+    check readFile(site / "public/posts/first/index.html") == published
+
+    # Fixing it recovers without a restart.
+    writeFile(site / "layouts/post.nim", layout.replace("      raw neighbours",
+      "      raw neighbours\n      p(class = \"layout-marker\"): text \"Layout edited\""))
+    check live.nextMessage(300_000) == "reload"
+    let recovered = get(port, "/posts/first/")
+    check not recovered.body.contains("Static export failed")
+    check recovered.body.contains("Layout edited")
+    check sha256Hex(readFile(program)) == goodProgram
+    live.socket.close()
+
+  test "serve binds loopback unless --lan, and rejects bad arguments":
+    check serveHost(ServeOptions()) == "127.0.0.1"
+    check serveHost(ServeOptions(lan: true)) == "0.0.0.0"
+    check servePort(ServeOptions()) == 4000
+    check rebuildCommand(ServeOptions(executable: "/x/isonim-blog", drafts: true)) ==
+      @["/x/isonim-blog", "build", "--incremental", "--drafts"]
+    let roots = watchRoots("/site", "/theme")
+    check "/site/site.toml" in roots
+    check "/site/posts" in roots
+    check "/theme/layouts" in roots
+    check "/site/public" notin roots
+    check "/site/build" notin roots
+    for args in [@["serve", "--port"], @["serve", "--port", "x"], @["serve", "--port", "70000"],
+        @["serve", "--open"]]:
+      let response = runCli(args)
+      check response.exitCode == 1
+      check response.error.len > 0

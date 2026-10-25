@@ -2,8 +2,11 @@
 
 The repository supplies the site model and the `build` command described in
 [Building a site](../users/building-a-site.md), including archives, feeds,
-the sitemap, responsive images and OpenGraph images. The preview server,
-scaffolding and packaged themes are not implemented yet.
+the sitemap, responsive images and OpenGraph images, and the authoring,
+preview and check commands of
+[Writing and previewing](../users/writing-and-previewing.md) with the
+[Cloudflare Pages recipe](../users/deploying-to-cloudflare-pages.md).
+Packaged themes are not implemented yet.
 Start with the commands in [AGENTS.md](../../AGENTS.md).
 
 ## Source map
@@ -23,6 +26,15 @@ Start with the commands in [AGENTS.md](../../AGENTS.md).
 - `src/isonim_blog/runtime.nim`: what the compiled program runs; it reads the
   content and exports the site, its feeds and its sitemap through
   `isonim/static`.
+- `src/isonim_blog/scaffold.nim`: `new site` (with the templates of the
+  generated flake, `repro.nim`, `Justfile` and deploy recipe), `new post`,
+  `new page` and `publish-draft`.
+- `src/isonim_blog/serve.nim`: `serve`, a configuration of IsoNim's
+  `isonim/server/static_dist_dev_server` whose rebuild command is
+  `build --incremental`.
+- `src/isonim_blog/site_check.nim`: `check`, over the built HTML (tokenized
+  by the pinned Python's `html.parser`) and the feeds; `--external` uses curl.
+- `src/isonim_blog/cli.nim`: argument parsing and dispatch for every command.
 - `src/isonim_blog_prepare.nim`: the preparation step as a separate tool, used
   by the Reprobuild graph and by the Nix `buildSite` wrapper (`nix/site.nix`).
 - `examples/basic/` is the generic fixture site; `tests/fixtures/` holds a

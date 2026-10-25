@@ -171,3 +171,47 @@ suite "build command":
     check second.output.startsWith("Reused the compiled site program")
     check readFile(bundle & ".key") == key
     check inputFiles(root / "public").filterIt(it.endsWith(".js")) == published
+
+  test "--incremental rewrites only changed files and removes what the build no longer writes":
+    let root = fixtureCopy()
+    let previous = getCurrentDir()
+    setCurrentDir(root)
+    defer:
+      setCurrentDir(previous)
+      removeDir(root)
+    putEnv("SOURCE_DATE_EPOCH", "1704067200")
+    defer: delEnv("SOURCE_DATE_EPOCH")
+    check build().exitCode == 0
+    let public = root / "public"
+    let full = treeHash(public, [])
+    let aboutTime = getLastModificationTime(public / "about/index.html")
+    # Leftovers of an earlier build, of every kind, in the output.
+    writeFile(public / "stale.html", "old")
+    createDir(public / "gone/deeper")
+    writeFile(public / "gone/deeper/page.html", "old")
+    removeFile(public / "robots.txt")
+    createDir(public / "robots.txt")           # a directory where a file belongs
+    writeFile(public / "robots.txt/x", "old")
+    createSymlink(root / "site.toml", public / "linked.txt")
+    let unchanged = build("--incremental")
+    check unchanged.exitCode == 0
+    check unchanged.output.contains("Updated 8 changed files\n")
+    for path in ["gone/", "gone/deeper/", "gone/deeper/page.html", "linked.txt", "robots.txt",
+        "robots.txt/", "robots.txt/x", "stale.html"]:
+      check unchanged.output.contains("\n  " & path & "\n")
+    check treeHash(public, []) == full
+    check not symlinkExists(public / "linked.txt")
+    check readFile(root / "site.toml").len > 0  # the link was removed, not followed
+    check getLastModificationTime(public / "about/index.html") == aboutTime
+    # A content edit rewrites what it reaches and nothing else.
+    writeFile(root / "posts/2020-01-01-first.md",
+      readFile(root / "posts/2020-01-01-first.md") & "\nIncremental.\n")
+    let edited = build("--incremental")
+    check edited.exitCode == 0
+    check edited.output.contains("\n  posts/first/index.html\n")
+    check edited.output.contains("\n  feed.xml\n")
+    check not edited.output.contains("about/index.html")
+    check getLastModificationTime(public / "about/index.html") == aboutTime
+    # The result equals a complete build.
+    check build("--out", "full").exitCode == 0
+    check treeHash(public, []) == treeHash(root / "full", [])

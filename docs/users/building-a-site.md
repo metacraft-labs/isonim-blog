@@ -262,8 +262,11 @@ inputs give the same bytes; `isonim-blog build` keeps encoded variants under
 With `scripts = "none"`, a built page contains no `<script>` element other
 than `application/ld+json` and the configured analytics snippet. A layout
 that emits any other script element, including an inert data block, fails the
-build. Each page's Content-Security-Policy in the generated `_headers` names
-only the scripts the page loads.
+build. The generated `_headers` carries a Content-Security-Policy whose
+`script-src` names only the scripts the pages load. The script policy is
+site-wide, so this is one rule for every path (`/*`), which keeps even a large
+site far below Cloudflare Pages' limit of 100 header rules; a site's own
+`static/_headers` is kept and the generated rules are appended to it.
 
 With `scripts = "islands"`, a layout may declare interactive islands:
 
@@ -279,7 +282,7 @@ fingerprinted bundle, loaded with `defer`.
 ## `isonim-blog build`
 
 ```sh
-isonim-blog build [--drafts] [--future] [--out public] [--url <origin>]
+isonim-blog build [--drafts] [--future] [--out public] [--url <origin>] [--incremental]
 ```
 
 Run it in the site's directory. It prints whether the site program was
@@ -288,6 +291,15 @@ replaces the canonical origin, for preview deployments. Compiled programs and
 their caches live under `build/isonim-blog/`. The output directory is written
 completely before it replaces the previous one, so a failed build leaves the
 last good output in place. It may not overlap the input directories.
+With `--incremental` (what `isonim-blog serve` uses) the complete output is
+still produced first, but then only the files whose bytes changed are written
+into the existing output directory and the files the build no longer produces
+are removed; unchanged files keep their timestamps.
+
+`redirect_from` entries in front matter become permanent (301) rules in the
+generated `_redirects`, after the site's own `static/_redirects` if it has
+one. Each entry is a literal site path (`/2019/old-post.html`, `/old/`); an
+entry claimed by two pages, or equal to a page's own URL, fails the build.
 
 Every build writes `build.json`: the generator, the source revision (a commit
 when the builder knows one, otherwise a content hash of every file the build
