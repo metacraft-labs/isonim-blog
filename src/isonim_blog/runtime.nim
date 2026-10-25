@@ -2,7 +2,7 @@
 import std/[os, strutils, json, tables, sets, algorithm, uri]
 import ./[model, inputs, version, html_checks, archives, listing, syndication, og]
 import isonim/content/[markdown, prose]
-import isonim/static/[exporter, buildinfo, assets, head, csp, sitemap, robots, ogimage]
+import isonim/static/[exporter, buildinfo, assets, head, csp, sitemap, robots, ogimage, feeds]
 import isonim/dsl/ui
 import isonim/ssr/escape
 export model, listing
@@ -85,6 +85,16 @@ proc ogImagePath(site: Site; url, png: string): string =
   if key.endsWith(".html"): key.setLen(key.len - 5)
   if key.len == 0: key = "index"
   hashedAssetName("assets/og/" & key & ".png", png)
+
+proc rootRelativeHtml*(html, pageUrl: string): string =
+  ## `html` written for the page at `pageUrl`, with every page-relative
+  ## `href`, `src`, `poster` and `srcset` reference made root-relative, so it
+  ## means the same on any page. References with a scheme or host, and
+  ## root-relative ones, are unchanged. Resolution is `absoluteHtmlUrls`'s
+  ## (RFC 3986 §5.2) against a reserved `.invalid` origin (RFC 2606), which is
+  ## then removed.
+  const origin = "http://isonim-blog.invalid"
+  absoluteHtmlUrls(html, origin & pageUrl).replace(origin, "")
 
 proc referencePath(pageUrl, reference: string): string =
   ## The site path a page-relative or root-relative reference names, without
@@ -189,6 +199,9 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     for rewrite in rewrites:
       page.content = page.content.replace("\"" & rewrite.original & "\"", "\"" & rewrite.hashed & "\"")
       page.excerpt = page.excerpt.replace("\"" & rewrite.original & "\"", "\"" & rewrite.hashed & "\"")
+    # A page-relative reference (`../other/`, `#heading`) in an excerpt would
+    # point elsewhere on a listing page, so excerpts carry root-relative ones.
+    page.excerpt = rootRelativeHtml(page.excerpt, page.url)
   # Layouts receive the same rendered records through all navigation views.
   site.posts.setLen(0)
   site.collections.clear()

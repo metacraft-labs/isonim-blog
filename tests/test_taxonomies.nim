@@ -131,6 +131,33 @@ suite "collections, taxonomies, archives and pagination":
     check listed(output, "/tags/nim/", "post-list") == @["third", "second", "first"]
     check not dirExists(output / "2099")
 
+  test "excerpts on listing pages carry root-relative links":
+    let root = fixtureCopy()
+    defer: removeDir(root)
+    fixedEpoch()
+    defer: delEnv("SOURCE_DATE_EPOCH")
+    # The newest post, so the first index page lists it with its excerpt.
+    writeFile(root / "posts/2021-06-06-related.md", "---\ntitle: Related\ndescription: Links\n---\n\n" &
+      "See [the first note](2020-01-01-first.md), [below](#more-below) and [the site](https://example.net/x).\n\n" &
+      "## More below\n\nThe rest.\n")
+    let binary = compileSite(root)
+    let output = root / "public"
+    discard runSite(binary, root, output)
+    var hrefs: seq[string]
+    var pending = @[parseHtml(readFile(output / "posts/index.html"))]
+    while pending.len > 0:
+      let node = pending.pop()
+      if node.kind != xnElement: continue
+      if node.tag == "a": hrefs.add node.attr("href")
+      for child in node: pending.add child
+    check "/posts/first/" in hrefs
+    check "/posts/related/#more-below" in hrefs
+    check "https://example.net/x" in hrefs
+    check "#more-below" notin hrefs
+    # The post's own page keeps its same-page fragment.
+    let own = readFile(output / "posts/related/index.html")
+    check own.contains("href=\"#more-below\"")
+
   test "collisions name both sources; listings can be moved or turned off":
     let root = fixtureCopy()
     defer: removeDir(root)
