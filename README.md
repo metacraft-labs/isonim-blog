@@ -9,7 +9,8 @@ a sitemap and JSON-LD metadata, responsive images and generated OpenGraph
 images, zero JavaScript by default and byte-reproducible Nix builds. The CLI
 creates sites and posts, previews them with live reload, checks links, feeds
 and front matter, and can generate a Cloudflare Pages deployment recipe.
-Packaged themes are not available yet.
+Themes are packages (or directories in the site's repository); new sites use
+the shipped `isonim-blog-theme-minimal`, plain, accessible and script-free.
 
 With Nix installed:
 
@@ -23,7 +24,7 @@ cd my-blog
 ```
 
 See [Writing and previewing](docs/users/writing-and-previewing.md),
-[Building a site](docs/users/building-a-site.md) and
+[Building a site](docs/users/building-a-site.md), [Themes](docs/users/themes.md) and
 [Deploying to Cloudflare Pages](docs/users/deploying-to-cloudflare-pages.md).
 
 See the [development notes](docs/contributors/development.md) and

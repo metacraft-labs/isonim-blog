@@ -3,7 +3,7 @@ import ./version
 import ./model
 when not defined(js):
   import std/[os, strutils]
-  import ./[program, scaffold, serve, site_check]
+  import ./[inputs, program, scaffold, serve, site_check]
 
 type CliResult* = object
   ## Output and status returned without writing streams or exiting the process.
@@ -12,19 +12,21 @@ type CliResult* = object
   exitCode*: int
 
 const helpText* = """Usage: isonim-blog [--help | --version]
-  or:  isonim-blog new site <dir> [--theme <path>] [--deploy cloudflare-pages]
+  or:  isonim-blog new site <dir> [--theme <name|path>] [--deploy cloudflare-pages]
   or:  isonim-blog new post "<title>" [--draft] [--date YYYY-MM-DD] [--bundle]
   or:  isonim-blog new page <path>
   or:  isonim-blog publish-draft <slug>
   or:  isonim-blog serve [--drafts] [--future] [--port 4000] [--lan]
   or:  isonim-blog build [--drafts] [--future] [--out public] [--url <origin>] [--incremental]
   or:  isonim-blog check [--external]
+  or:  isonim-blog theme eject <file>
 
 Static blogs with IsoNim. Run every command except `new site` in the site's
 directory (the one holding site.toml).
 
   new site        create a site: site.toml, a sample post, flake.nix, repro.nim,
-                  Justfile and .gitignore; --deploy adds the Cloudflare Pages recipe
+                  Justfile and .gitignore; --deploy adds the Cloudflare Pages recipe;
+                  the theme is isonim-blog-theme-minimal unless --theme names another
   new post        create posts/<date>-<slug>.md (drafts/<slug>.md with --draft,
                   a directory with index.md with --bundle)
   new page        create pages/<path>.md
@@ -36,6 +38,9 @@ directory (the one holding site.toml).
   check           build as production does and check internal links and
                   anchors, front matter, alt text, scripts and feeds;
                   --external also requests every external link
+  theme eject     copy a file of the site's theme (layouts/, includes/,
+                  assets/ or og.svg.nim) into the site, where it overrides
+                  the theme's; delete the copy to return to the theme's
 """
 
 when not defined(js):
@@ -139,7 +144,7 @@ proc runCli*(args: openArray[string]): CliResult =
   if args.len == 1 and args[0] == "--version":
     result.output = "isonim-blog " & isonimBlogVersion & "\n"
     return
-  if args[0] notin ["build", "new", "publish-draft", "serve", "check"]:
+  if args[0] notin ["build", "new", "publish-draft", "serve", "check", "theme"]:
     result.error = "Unsupported arguments. Run isonim-blog --help for available options.\n"
     result.exitCode = 1
     return
@@ -154,6 +159,11 @@ proc runCli*(args: openArray[string]): CliResult =
         result.output = "Published " & publishDraft(getCurrentDir(), args[1]) & "\n"
       of "serve": runServe(args)
       of "check": result = runCheck(args)
+      of "theme":
+        if args.len != 3 or args[1] != "eject": fail("usage: isonim-blog theme eject <file>")
+        let rel = ejectThemeFile(getCurrentDir(), args[2])
+        result.output = "Ejected " & rel & ": the site's copy now overrides the theme's; " &
+          "delete it to use the theme's again\n"
   except CatchableError as cause:
     result.error = cause.msg & "\n"
     result.exitCode = 1

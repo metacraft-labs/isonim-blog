@@ -5,8 +5,8 @@ The repository supplies the site model and the `build` command described in
 the sitemap, responsive images and OpenGraph images, and the authoring,
 preview and check commands of
 [Writing and previewing](../users/writing-and-previewing.md) with the
-[Cloudflare Pages recipe](../users/deploying-to-cloudflare-pages.md).
-Packaged themes are not implemented yet.
+[Cloudflare Pages recipe](../users/deploying-to-cloudflare-pages.md), and
+themes as packages with the shipped `themes/minimal` ([Themes](../users/themes.md)).
 Start with the commands in [AGENTS.md](../../AGENTS.md).
 
 ## Source map
@@ -14,7 +14,14 @@ Start with the commands in [AGENTS.md](../../AGENTS.md).
 - `src/isonim_blog/model.nim`: backend-independent configuration, front
   matter, permalink and collision rules (tested on C and JavaScript).
 - `src/isonim_blog/inputs.nim`: the native input boundary. It walks only the
-  declared directories and decodes TOML with the pinned Python `tomllib`.
+  declared directories and decodes TOML with the pinned Python `tomllib`. It
+  also resolves the theme (by path, or by package name through
+  `ISONIM_BLOG_THEME_PATH` and the shipped `themes/`), reads `theme.toml`,
+  merges the theme's defaults under `site.toml` and implements `theme eject`.
+- `src/isonim_blog/theme_format.nim`: the backend-independent theme format:
+  `theme.toml` validation, default configuration, required keys, and DTCG
+  tokens resolved to CSS custom properties and `theme-color` (tested on C and
+  JavaScript).
 - `src/isonim_blog/program.nim`: generates the layout program from
   `layouts/` and `includes/` (code only) and compiles it once per source hash.
 - `src/isonim_blog/archives.nim`: backend-independent navigation (previous,
@@ -37,8 +44,14 @@ Start with the commands in [AGENTS.md](../../AGENTS.md).
 - `src/isonim_blog/cli.nim`: argument parsing and dispatch for every command.
 - `src/isonim_blog_prepare.nim`: the preparation step as a separate tool, used
   by the Reprobuild graph and by the Nix `buildSite` wrapper (`nix/site.nix`).
+- `themes/minimal/` is the shipped default theme (also a Nimble package).
 - `examples/basic/` is the generic fixture site; `tests/fixtures/` holds a
-  theme and an islands site for the Nix checks and tests.
+  small theme and an islands site for the Nix checks and tests, the theme
+  conformance fixture (`theme-conformance/`, content only) and a fixture theme
+  exercising the format's expressive features (`theme-capabilities/`).
+- `tests/theme_kit.nim` and `tests/theme_kit_browser.mjs` are the theme
+  conformance kit (`just test-theme <theme>`); `tests/theme_kit_controls.nim`
+  checks that the kit fails for broken themes (`just test-theme-controls`).
 
 ## Build graph
 

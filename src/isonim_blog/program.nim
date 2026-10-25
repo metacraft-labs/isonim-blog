@@ -12,12 +12,6 @@ proc writeChanged*(path, content: string) =
   createDir(parentDir(path))
   writeFile(path, content)
 
-proc resolveTheme*(root: string; explicit = ""): string =
-  let configured = if explicit.len > 0: explicit else: readSiteConfig(root).theme
-  if configured.len == 0: return ""
-  result = if configured.isAbsolute: configured else: root / configured
-  if not dirExists(result): fail("theme path does not exist: " & configured)
-
 const ogTemplateName* = "og.svg.nim"
   ## A theme's or site's OpenGraph template, at its root.
 
@@ -74,9 +68,19 @@ proc prepareProgram*(root, directory: string; theme = ""): string =
     let prefix = "layout" & $i
     program.add "\n  LayoutEntry(name: " & $(%name) & ", parent: " & prefix & ".blogParent(), render: " & prefix & ".layout, islands: " & prefix & ".blogIslands())"
   program.add "]\n"
+  # Directive renderers (`includes/directives.nim` of the site or its theme)
+  # reach the Markdown parser of every page.
+  let directives =
+    if "includes/directives.nim" in sources:
+      program.add "import includes/directives as blogdirectives\n" &
+        "proc blogDirectives(): seq[DirectiveRegistration] =\n" &
+        "  when declared(blogdirectives.directives): blogdirectives.directives()\n" &
+        "  else: {.error: \"includes/directives.nim must export proc directives*(): seq[DirectiveRegistration]\".}\n"
+      "blogDirectives()"
+    else: "@[]"
   if hasOgTemplate:
-    program.add "import og_template as ogtemplate\nwhen isMainModule: siteMain(layouts, ogtemplate.ogImage)\n"
-  else: program.add "when isMainModule: siteMain(layouts)\n"
+    program.add "import og_template as ogtemplate\nwhen isMainModule: siteMain(layouts, ogtemplate.ogImage, " & directives & ")\n"
+  else: program.add "when isMainModule: siteMain(layouts, directives = " & directives & ")\n"
   result = directory / "site_program.nim"
   writeChanged(result, program)
 
@@ -182,7 +186,7 @@ proc buildSite*(root: string; options = BuildOptions()): string =
   result = (if program.reused: "Reused the compiled site program (layouts unchanged)\n"
     else: "Compiled the site program\n")
   var bundle = ""
-  if readSiteConfig(root).scriptPolicy == spDeclared:
+  if readSiteConfig(root, theme).scriptPolicy == spDeclared:
     let islands = parseJson(runTool(program.path, ["--islands"]))
     if islands.len > 0:
       let client = compileCached(directory / "program",

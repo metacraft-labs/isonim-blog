@@ -15,8 +15,10 @@
 #    its standard postBuild hook, after the optional islands bundle compile.
 #
 # `src` must carry `lastModified` (a flake input, `self`, or
-# `{ outPath; lastModified; rev ? ...; }`). `theme` defaults to the path named
-# by `theme` in site.toml, relative to `src`.
+# `{ outPath; lastModified; rev ? ...; }`). `theme` defaults to the theme
+# site.toml names: a path relative to `src`, or the package name of a theme
+# isonim-blog ships (`isonim-blog-theme-minimal`). A theme package from
+# elsewhere is a flake input passed as `theme`.
 {
   pkgs,
   inputs,
@@ -37,13 +39,38 @@ let
     else
       throw "buildSite: src must carry lastModified (use a flake input or { outPath; lastModified; })";
   config = builtins.fromTOML (builtins.readFile "${src}/site.toml");
+  # site.toml names its theme by path (relative to the site) or by package
+  # name. The themes isonim-blog ships resolve by name here, as they do for
+  # the CLI; any other package is passed in as `theme` (a flake input), and
+  # the build checks that its theme.toml names the package site.toml asks for.
+  configuredTheme = config.theme or "";
+  shippedPrefix = "isonim-blog-theme-";
+  shippedTheme =
+    name:
+    let
+      dir = "${self}/themes/${lib.removePrefix shippedPrefix name}";
+    in
+    if
+      lib.hasPrefix shippedPrefix name
+      && builtins.pathExists "${dir}/theme.toml"
+      && (builtins.fromTOML (builtins.readFile "${dir}/theme.toml")).name or "" == name
+    then
+      dir
+    else
+      null;
   themeSrc =
     if theme != null then
       "${theme}"
-    else if (config.theme or "") != "" then
-      "${src}/${config.theme}"
+    else if configuredTheme == "" then
+      null
+    else if lib.hasPrefix "/" configuredTheme then
+      throw "buildSite: site.toml names the absolute theme path ${configuredTheme}, which the sandbox cannot read; name it relative to the site or pass theme = <path or flake input>"
+    else if lib.hasInfix "/" configuredTheme || lib.hasPrefix "." configuredTheme then
+      "${src}/${configuredTheme}"
+    else if shippedTheme configuredTheme != null then
+      shippedTheme configuredTheme
     else
-      null;
+      throw "buildSite: site.toml names the theme package ${configuredTheme}, which isonim-blog does not ship; pass it as buildSite { theme = inputs.<theme>; }";
   islands = ((config.output or { }).scripts or "none") == "islands";
   cli = self.packages.${system}.isonim-blog;
   python = "${pkgs.python3}/bin/python3";

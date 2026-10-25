@@ -1,0 +1,13 @@
+# isonim-blog-theme-minimal: the default theme shipped with isonim-blog.
+name = "isonim-blog-theme-minimal"
+version = "0.1.0"
+description = "A plain, accessible theme with no JavaScript, in light and dark"
+tokens = ["tokens.json"]
+stylesheets = ["assets/minimal.css"]
+theme_color = "sys.color.surface"
+# The header and the home page show the site description.
+required = ["description"]
+directives = []
+
+[config]
+paginate = 10

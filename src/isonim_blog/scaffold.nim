@@ -12,7 +12,8 @@ type
     ## `new site --deploy <target>`.
     dtNone, dtCloudflarePages
   NewSiteOptions* = object
-    theme*: string          ## written as `theme` in site.toml when not empty
+    theme*: string
+      ## Written as `theme` in site.toml; empty selects `defaultTheme`.
     deploy*: DeployTarget
     isonimBlogRef*: string
       ## The flake reference the generated flake.nix names; empty selects
@@ -22,6 +23,9 @@ type
     date*: string           ## YYYY-MM-DD; empty means today
 
 const
+  defaultTheme* = "isonim-blog-theme-minimal"
+    ## The theme a new site uses unless `--theme` names another: the plain,
+    ## accessible theme isonim-blog ships (themes/minimal).
   isonimBlogRepository* = "github:metacraft-labs/isonim-blog"
   productionBranch* = "main"
     ## The production branch the deploy recipe assumes. Cloudflare Pages
@@ -355,7 +359,8 @@ proc newSite*(directory: string; options = NewSiteOptions(); today = ""): seq[st
     "url = \"https://example.org\"\n" &
     "language = \"en\"\n" &
     "timezone = \"UTC\"\n"
-  if options.theme.len > 0: config.add "theme = " & tomlString(options.theme) & "\n"
+  config.add "# The theme: a package name, or a directory relative to this file.\n" &
+    "theme = " & tomlString(if options.theme.len > 0: options.theme else: defaultTheme) & "\n"
   config.add "\n[archives]\n" &
     "# The paginated post list is the home page; set index = \"/posts/\" to give\n" &
     "# the home page to pages/index.md instead.\n" &

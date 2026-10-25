@@ -1,0 +1,89 @@
+---
+title: Every prose feature
+description: Headings, lists, tasks, quotes, code, tables, footnotes and asides
+tags: [writing, reference]
+categories: [guides]
+series: Feature tour
+series_order: 1
+toc: true
+updated: 2024-03-01
+kind: essay
+status: revised
+credits: [Text by the example author, Review by a second example author]
+---
+
+This post uses every block and inline feature of the Markdown dialect, so a
+theme can show how it styles each one.[^why]
+
+<!--more-->
+
+## Inline text
+
+Plain text with `inline code`, a [link to another post](2023-06-01-short-note.md), an
+[external link](https://example.com/docs/), ~~struck-through text~~ and an
+autolink: <https://example.com/a/very/long/path/that/must/wrap/on/a/narrow/screen/without/scrolling>.
+A long word: Donaudampfschifffahrtsgesellschaftskapitänswitwenrentenversicherung.
+
+## Lists
+
+- A first item
+- A second item with `code`
+- A third item
+
+1. Step one
+2. Step two
+3. Step three
+
+### Tasks
+
+- [x] Write the content
+- [ ] Review the theme
+- [ ] Publish the site
+
+## Quotation
+
+> A quotation can hold several paragraphs.
+>
+> This is the second one, with a [link](https://example.com/).
+
+## Code
+
+```nim
+proc greet(name: string): string =
+  ## A short procedure.
+  result = "Hello, " & name & "!"
+
+echo greet("world")
+```
+
+## Table
+
+| Feature   | Markdown   | Notes                              |
+| --------- | ---------- | ---------------------------------- |
+| Code      | backticks  | inline and fenced                  |
+| Tables    | pipes      | scroll inside themselves if narrow |
+| Footnotes | `[^label]` | numbered in order of reference     |
+
+A wide table must fit a narrow screen too:
+
+| Release | Date       | Platforms                      | Highlights                                  | Download                                  |
+| ------- | ---------- | ------------------------------ | ------------------------------------------- | ----------------------------------------- |
+| 1.0     | 2024-01-10 | Linux, macOS, Windows, FreeBSD | The first stable release with every feature | https://example.com/releases/1.0/download |
+
+## Asides
+
+:::note
+An aside sets a remark apart from the main text.
+:::
+
+:::warning
+A warning is an aside too.
+:::
+
+#### A fourth-level heading
+
+The last paragraph refers to a second footnote.[^second]
+
+[^why]: Every feature in one place makes a theme easy to review.
+
+[^second]: Footnotes link back to where they were referenced.

@@ -1,0 +1,23 @@
+/* The print stylesheet: both layers, no controls, links spelled out. */
+@media print {
+  .reading-progress,
+  .layer-switch,
+  button,
+  .colophon {
+    display: none !important;
+  }
+  .details,
+  .overview,
+  [popover].credits {
+    display: block !important;
+    position: static;
+  }
+  body {
+    background: #fff;
+    color: #000;
+    max-width: none;
+  }
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+  }
+}

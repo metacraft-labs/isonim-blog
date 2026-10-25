@@ -1,0 +1,15 @@
+{
+  "ref": {
+    "color": {
+      "$type": "color",
+      "paper": { "$value": "#fbfaf7" },
+      "ink": { "$value": "#1c1b19" },
+      "ink-soft": { "$value": "#55524c" },
+      "night": { "$value": "#15161a" },
+      "moon": { "$value": "#ecebe8" },
+      "moon-soft": { "$value": "#b3b1ab" },
+      "teal-800": { "$value": "#0f5f5a" },
+      "teal-200": { "$value": "#8ee0d6" }
+    }
+  }
+}

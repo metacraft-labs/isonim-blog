@@ -1,0 +1,19 @@
+# A generic fixture theme showing that the theme format carries an
+# ambitious, script-free design: CSS-only state through :has(), popovers,
+# scroll-driven animation, a print stylesheet, layout driven by front-matter
+# fields (page.extra: kind, status, credits), a registered directive,
+# required site keys and default configuration. Not a theme to ship.
+name = "fixture-capabilities"
+version = "0.0.1"
+description = "Fixture theme exercising the format's expressive features"
+tokens = ["tokens/ref.json", "tokens/sys.json"]
+stylesheets = ["assets/screen.css", "assets/print.css"]
+theme_color = "sys.color.paper"
+required = ["author.name"]
+directives = ["pullquote"]
+
+[config]
+paginate = 3
+
+[config.feeds]
+per_tag = false

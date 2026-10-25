@@ -5,7 +5,8 @@ implements `build` (see `docs/users/building-a-site.md`), with archives,
 feeds, the sitemap, responsive images and OpenGraph images; `new`,
 `publish-draft`, `serve` and `check` (`docs/users/writing-and-previewing.md`);
 the Cloudflare Pages recipe (`docs/users/deploying-to-cloudflare-pages.md`);
-`--help` and `--version`. Themes are later work.
+themes as packages, `theme eject` and the shipped `themes/minimal`
+(`docs/users/themes.md`); `--help` and `--version`.
 
 Enter this repository's `nix develop` shell before running commands:
 
@@ -17,11 +18,16 @@ just pre-commit  # the shared hook set, plus repository checks
 just fmt         # format Nim, Nix and shell sources
 nix build        # CLI package, with every suite run in the sandbox
 just nix-build   # the package plus the sandboxed site-builder checks
+just test-theme themes/minimal  # theme conformance kit, axe-core in Chromium
+just test-theme-controls        # the kit must fail for broken themes
 ```
 
-Run the complete suite during development and before every push: thirteen
-suites (58 cases) on C, and the two backend-independent suites (13 cases)
-on JavaScript too. The site suites compile real site programs with the real
+Run the complete suite during development and before every push: sixteen
+suites on C, and the three backend-independent suites on JavaScript too.
+After changing a theme, the theme format or the content renderer, also run
+`just test-theme themes/minimal` and `just test-theme-controls`: they drive
+the dev shell's pinned Playwright Chromium and axe-core, so they run outside
+the sandboxed and Reprobuild suites. The site suites compile real site programs with the real
 Nim compiler; no browser is needed. The image and OpenGraph suites run the
 libvips and resvg the dev shell provides; the serve suite runs a real server
 on a loopback port; the check suite starts a local HTTP server for
@@ -37,7 +43,8 @@ to investigate failures. Record measured timings with the tested revision.
 
 `src/isonim_blog.nim` is the library entry point and `src/isonim_blog_cli.nim`
 owns process I/O. The development notes map the remaining modules. Tests use
-the generic `examples/basic/` site; never add personal or private content.
+the generic `examples/basic/` site and `tests/fixtures/`; never add personal
+or private content, and never a theme other than generic ones.
 `config.nims` chooses sibling sources for development
 and locked Nix inputs for standalone and sandboxed builds. See
 [development notes](docs/contributors/development.md) for source selection.

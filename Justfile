@@ -21,6 +21,9 @@ lint-checks:
     nim check src/isonim_blog_cli.nim
     nim check src/isonim_blog_prepare.nim
     for suite in tests/test_*.nim; do nim check "$suite"; done
+    nim check tests/theme_kit.nim
+    nim check tests/theme_kit_controls.nim
+    node --check tests/theme_kit_browser.mjs
     nixfmt --check flake.nix nix/site.nix
     shellcheck scripts/*.sh
     shfmt -d scripts/*.sh
@@ -41,7 +44,24 @@ nix-build:
     system="$(nix eval --raw --impure --expr builtins.currentSystem)"; \
     nix build --print-build-logs .#default \
         ".#checks.$system.example-basic" \
+        ".#checks.$system.theme-minimal" \
         ".#checks.$system.build-site-contract" \
         ".#checks.$system.build-site-islands" 2>&1 | tee test-logs/nix-build.log
+
+# The theme conformance kit: check a theme directory (the shipped
+# themes/minimal, a theme package, or a private site-local theme) against
+# the generic fixture, including axe-core in Chromium in both colour schemes.
+test-theme theme:
+    @mkdir -p test-logs build/bin
+    nim c --hints:off -d:release --out:build/bin/theme-kit --nimcache:build/nimcache/theme-kit tests/theme_kit.nim
+    theme={{ quote(theme) }}; case "$theme" in /*) ;; *) theme={{ quote(invocation_directory()) }}/"$theme" ;; esac; \
+        build/bin/theme-kit "$theme" 2>&1 | tee test-logs/test-theme.log
+
+# The kit's browser checks must fail for broken themes: low contrast in
+# either scheme, sideways scrolling at 360px, a script, a missing layout.
+test-theme-controls:
+    @mkdir -p test-logs build/bin
+    nim c --hints:off -d:release --out:build/bin/theme-kit --nimcache:build/nimcache/theme-kit tests/theme_kit.nim
+    nim c -r --hints:off --out:build/bin/theme-kit-controls --nimcache:build/nimcache/theme-kit-controls tests/theme_kit_controls.nim 2>&1 | tee test-logs/test-theme-controls.log
 
 alias t := test

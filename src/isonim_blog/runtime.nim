@@ -1,11 +1,11 @@
 ## Content-only execution of a compiled site's layout registry.
 import std/[os, strutils, json, tables, sets, algorithm, uri]
 import ./[model, inputs, version, html_checks, archives, listing, syndication, og]
-import isonim/content/[markdown, prose]
+import isonim/content/[markdown, prose, directives]
 import isonim/static/[exporter, buildinfo, assets, head, csp, sitemap, robots, ogimage, feeds]
 import isonim/dsl/ui
 import isonim/ssr/escape
-export model, listing
+export model, listing, directives
 
 proc defaultLayout*(page: Page; site: Site; content: string): string =
   ## A structural fallback for sites that have not provided a layout yet.
@@ -228,15 +228,34 @@ proc syncTree*(source, target: string): seq[string] =
     result.add path.replace('\\', '/')
   result.sort()
 
+proc checkDirectives*(declared: openArray[string]; registered: openArray[DirectiveRegistration];
+    themeName: string) =
+  ## Every directive a theme declares in theme.toml must be registered by
+  ## the compiled `includes/directives.nim` (the theme's, or a site's copy
+  ## that replaces it). A site may register more.
+  var names: seq[string]
+  for registration in registered: names.add registration.name
+  for name in declared:
+    if name notin names:
+      fail("theme " & themeName & " declares directive " & name &
+        " in theme.toml, but includes/directives.nim does not register it")
+
 proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     options: BuildOptions; bundle: string; ogTemplate: OgTemplate;
-    changed: var seq[string]): ExportReport =
+    changed: var seq[string]; directives: seq[DirectiveRegistration] = @[]): ExportReport =
   ## Prepare all output using shared primitives and publish one complete tree.
   ## With `options.incremental` and an existing output, `changed` receives
   ## the output paths that were written or removed; otherwise it is empty.
   changed.setLen(0)
   validateOutput(root, output)
   var site = loadSite(root, options)
+  let themeDir = resolveTheme(root, options.theme)
+  var manifest: ThemeManifest
+  if themeDir.len > 0:
+    manifest = readThemeManifest(themeDir)
+    checkDirectives(manifest.directives, directives, manifest.name)
+  let hooks = if directives.len > 0: @[ParseHooks(name: "directives", directives: directives)]
+    else: newSeq[ParseHooks]()
   if site.config.url.len == 0:
     fail("url is required (in site.toml or with --url): canonical links, feeds and the sitemap need an absolute origin")
   var files: seq[SiteFile]
@@ -259,7 +278,7 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     siteFiles[site.config.basePath & "/" & hashed] = (path, content)
   # A theme's assets sit under the site's: the site's file of the same path wins.
   var assetSources = initOrderedTable[string, string]()
-  for base in [options.theme, root]:
+  for base in [themeDir, root]:
     if base.len == 0: continue
     for file in inputFiles(base / "assets"):
       assetSources["assets/" & relativePath(file, base / "assets").replace('\\', '/')] = file
@@ -270,6 +289,21 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     let file = assetSources[path]
     let origin = if file.startsWith(root & DirSep): relativePath(file, root) else: "theme " & path
     addAsset(path, readFile(file), origin)
+  # The theme's stylesheets: the one generated from its tokens (unless the
+  # site supplies its own file at that path), then those theme.toml lists.
+  if themeDir.len > 0:
+    if manifest.tokenFiles.len > 0 and not assetSources.hasKey(tokenStylesheetPath):
+      addAsset(tokenStylesheetPath, tokenStylesheet(site.theme.tokens), "theme " & manifest.name & " tokens")
+    if site.assets.hasKey(tokenStylesheetPath) and manifest.tokenFiles.len > 0:
+      site.theme.stylesheets.add site.assets[tokenStylesheetPath]
+    for path in manifest.stylesheets: site.theme.stylesheets.add site.assets[path]
+  var stylesheetLinks = ""
+  for url in site.theme.stylesheets:
+    stylesheetLinks.add "<link rel=\"stylesheet\" href=\"" & escapeAttr(url) & "\">"
+  var colorMetas: seq[ThemeColor]
+  if themeDir.len > 0:
+    for (color, media) in themeColors(site.theme.tokens, manifest.themeColor):
+      colorMetas.add ThemeColor(color: color, media: media)
   # Bundle resources belong only to included posts, never excluded drafts.
   for page in site.pages:
     if page.source.endsWith("/index.md") and page.collection == "posts":
@@ -307,7 +341,7 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   for page in site.pages: routes[page.source] = page.url
   for page in site.pages.mitems:
     let source = page.source
-    let doc = parseMarkdownDoc(page.body, page.source,
+    let doc = parseMarkdownDocWithHooks(hooks, page.body, page.source,
       resolveContentPath = proc(path: string): string =
         if not routes.hasKey(path): fail(source & ": missing content target " & path)
         routes[path], firstLine = page.bodyLine)
@@ -379,12 +413,12 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
       description: page.description, siteName: site.config.title,
       canonicalUrl: if page.canonical.len > 0: page.canonical else: site.config.url & page.url,
       ogType: if isPost: "article" else: "website",
-      ogImage: ogImageUrl(page), twitterCard: "summary_large_image")
+      ogImage: ogImageUrl(page), twitterCard: "summary_large_image", themeColors: colorMetas)
     documentHead.jsonLd = jsonLdFor(site, page, documentHead.canonicalUrl)
     let bodyHtml = applyLayouts(page, site, layouts)
     let headHtml = renderPageHeadHtml(documentHead, keptScripts, policy = site.config.scriptPolicy)
     let ending = renderBodyEndScriptsHtml(keptScripts, policy = site.config.scriptPolicy)
-    let headExtra = feedLinksHtml(site, page) &
+    let headExtra = stylesheetLinks & feedLinksHtml(site, page) &
       (if page.noindex: "<meta name=\"robots\" content=\"noindex\">" else: "")
     let markup = ui:
       html(lang = site.config.language):
@@ -458,8 +492,8 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
         inputs.add (relativePath(file, root).replace('\\', '/'), readFile(file))
       inputs))
     let themeRevision =
-      if options.theme.len == 0: getEnv("ISONIM_BLOG_THEME_REVISION", "none")
-      else: getEnv("ISONIM_BLOG_THEME_REVISION", themeTreeHash(options.theme))
+      if themeDir.len == 0: getEnv("ISONIM_BLOG_THEME_REVISION", "none")
+      else: getEnv("ISONIM_BLOG_THEME_REVISION", themeTreeHash(themeDir))
     discard writeBuildInfo(stage.path, SiteBuildInfo(generator: "isonim-blog " & isonimBlogVersion,
       sourceRevision: sourceRevision, sourceDateEpoch: site.sourceDateEpoch,
       components: @[
@@ -477,12 +511,14 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   for warning in site.warnings: stderr.writeLine("warning: " & warning)
 
 proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
-    options = BuildOptions(); bundle = ""; ogTemplate: OgTemplate = defaultOgImage): ExportReport =
+    options = BuildOptions(); bundle = ""; ogTemplate: OgTemplate = defaultOgImage;
+    directives: seq[DirectiveRegistration] = @[]): ExportReport =
   ## `exportBlog` without the list of changed files.
   var changed: seq[string]
-  exportBlog(root, output, layouts, options, bundle, ogTemplate, changed)
+  exportBlog(root, output, layouts, options, bundle, ogTemplate, changed, directives)
 
-proc siteMain*(layouts: openArray[LayoutEntry]; ogTemplate: OgTemplate = defaultOgImage) =
+proc siteMain*(layouts: openArray[LayoutEntry]; ogTemplate: OgTemplate = defaultOgImage;
+    directives: seq[DirectiveRegistration] = @[]) =
   ## Generated exporter protocol: output directory, then site root and options.
   try:
     let args = commandLineParams()
@@ -491,6 +527,12 @@ proc siteMain*(layouts: openArray[LayoutEntry]; ogTemplate: OgTemplate = default
       var values = newJArray()
       for island in declaredIslands(layouts): values.add %*{"module": island.module, "selector": island.selector}
       echo $values
+      return
+    if args == @["--directives"]:
+      # The registered directive names, for the theme conformance kit.
+      var names = newJArray()
+      for registration in directives: names.add %registration.name
+      echo $names
       return
     if args.len == 0: fail("site exporter requires an output directory")
     var options: BuildOptions
@@ -515,7 +557,7 @@ proc siteMain*(layouts: openArray[LayoutEntry]; ogTemplate: OgTemplate = default
       else: fail("unknown exporter argument " & args[i])
       inc i
     var changed: seq[string]
-    let report = exportBlog(root, args[0], layouts, options, bundle, ogTemplate, changed)
+    let report = exportBlog(root, args[0], layouts, options, bundle, ogTemplate, changed, directives)
     echo "Built " & $report.pages.len & " pages and " & $report.files.len & " files in " & args[0]
     if options.incremental:
       echo "Updated " & $changed.len & " changed files"

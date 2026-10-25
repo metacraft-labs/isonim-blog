@@ -5,6 +5,7 @@
 ##
 ## Every proc returns markup that escapes its text, so titles and terms from
 ## content files cannot inject markup.
+import std/strutils
 import isonim/dsl/ui
 import isonim/ssr/escape
 import ./[model, archives]
@@ -62,6 +63,30 @@ proc seriesNavigationHtml*(page: Page): string =
           else:
             li:
               a(href = entry.url): text entry.title
+
+proc pageAssetUrl*(site: Site; page: Page; reference: string): string =
+  ## The URL a layout writes for a file named in front matter (`image`): an
+  ## `http(s)` URL unchanged; a site path (`/assets/hero.png`) or a path
+  ## relative to the page's source file (`photo.png` in a post bundle)
+  ## mapped to its fingerprinted asset URL. A path that is no asset is
+  ## returned as a site path under the base path (a `static/` file, or a
+  ## missing one, which the build's image check then reports).
+  let value = reference.strip()
+  let lower = value.toLowerAscii
+  if value.len == 0 or lower.startsWith("https://") or lower.startsWith("http://"): return value
+  var parts: seq[string]
+  if not value.startsWith("/"):
+    parts = page.source.split('/')
+    parts.setLen(max(parts.len - 1, 0))
+  for part in value.split('/'):
+    case part
+    of "", ".": discard
+    of "..":
+      if parts.len > 0: parts.setLen(parts.len - 1)
+    else: parts.add part
+  let path = parts.join("/")
+  if site.assets.hasKey(path): site.assets[path]
+  else: site.config.basePath & "/" & path
 
 proc defaultListLayout*(page: Page; site: Site; content: string): string =
   ## The structural fallback for generated pages when a site has no

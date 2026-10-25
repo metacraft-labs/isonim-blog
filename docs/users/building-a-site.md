@@ -52,7 +52,7 @@ base_path = ""                        # for a site served under a sub-path
 language = "en"
 timezone = "UTC"                      # an IANA zone; decides the build date
 permalink = "/posts/:slug/"           # default for posts
-theme = "themes/plain"                # optional: a theme directory, relative to the site
+theme = "isonim-blog-theme-minimal"   # optional: a theme package, or a directory relative to the site
 paginate = 10                         # posts per index page
 author = { name = "Example Author", url = "/about/" }
 
@@ -150,8 +150,10 @@ unchanged: the cache key covers every layout and include, the IsoNim and
 isonim-blog sources it is compiled against, the compiler version and the
 compiler command, but no content. Editing Markdown therefore never recompiles.
 
-A theme directory supplies `layouts/`, `includes/` and `assets/`. The site's
-file wins over the theme's file of the same path.
+A theme supplies `layouts/`, `includes/`, `assets/`, `og.svg.nim`, design
+tokens and default configuration; see [Themes](themes.md). The site's file
+wins over the theme's file of the same path, and `isonim-blog theme eject
+<file>` copies a theme file into the site.
 
 ## Archives and pagination
 
@@ -313,7 +315,7 @@ The flake exports `lib.<system>.buildSite`:
 ```nix
 isonim-blog.lib.${system}.buildSite {
   src = self;               # needs lastModified; a flake input or self has it
-  theme = null;             # a theme directory; default: theme in site.toml
+  theme = null;             # a theme directory or flake input; default: theme in site.toml
   drafts = false;
   url = null;               # overrides url from site.toml
 }

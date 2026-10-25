@@ -1,0 +1,3 @@
+# A small path-named theme for the build tests: one extra layout and assets.
+name = "fixture-theme"
+version = "0.0.1"

@@ -50,7 +50,8 @@ package isonim_blog:
     var testBuilds = @[native.action, javascript]
     for name in ["test_model_pure", "test_site_model", "test_zero_js_default", "test_cli_build",
         "test_taxonomies", "test_feeds", "test_static_images", "test_static_ogimage",
-        "test_check", "test_serve_reload", "test_cli_scaffold", "test_deploy_recipe"]:
+        "test_check", "test_serve_reload", "test_cli_scaffold", "test_deploy_recipe",
+        "test_theme_format", "test_theme_override", "test_theme_kit"]:
       let compiled = buildNimUnittest.build(
         source = "tests/" & name & ".nim", binary = "build/tests/" & name,
         nimcache = "build/nimcache/" & name, warningsOff = false,
@@ -62,6 +63,12 @@ package isonim_blog:
     testBuilds.add modelJs
     testRuns.add node(args = @["build/tests/test_model_pure.js"], after = @[modelJs],
       extraInputs = @["build/tests/test_model_pure.js"], actionId = "isonim-blog.model-js-run")
+    # The theme format (manifest, defaults, tokens) is backend-independent too.
+    let themeJs = nim.js(source = "tests/test_theme_format.nim",
+      output = "build/tests/test_theme_format.js", actionId = "isonim-blog.theme-format-js-build")
+    testBuilds.add themeJs
+    testRuns.add node(args = @["build/tests/test_theme_format.js"], after = @[themeJs],
+      extraInputs = @["build/tests/test_theme_format.js"], actionId = "isonim-blog.theme-format-js-run")
 
     # The example site as three edges with different inputs: preparation
     # reads only layouts/ and includes/, the compile reads the prepared

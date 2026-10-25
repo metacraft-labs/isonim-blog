@@ -74,6 +74,22 @@
             # `check --external` requests external links with curl.
             ISONIM_BLOG_CURL = pkgs.lib.getExe pkgs.curl;
           };
+          # axe-core, pinned, for the browser half of the theme conformance
+          # kit (`just test-theme`, tests/theme_kit_browser.mjs). nixpkgs does
+          # not package it, so the npm registry tarball is a fixed-output
+          # fetch pinned by the registry's own sha512 integrity, and its
+          # prebuilt axe.min.js (with its licence, MPL-2.0) is all the kit
+          # injects. To move the pin, change the version in both places and
+          # the hash to the new tarball's integrity (`npm view axe-core@<v> dist`).
+          axeCoreTarball = pkgs.fetchurl {
+            url = "https://registry.npmjs.org/axe-core/-/axe-core-4.13.0.tgz";
+            hash = "sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==";
+          };
+          axeCore = pkgs.runCommand "isonim-blog-axe-core-4.13.0" { } ''
+            mkdir -p $out
+            tar -xzf ${axeCoreTarball} -C $out --strip-components=1 \
+              package/axe.min.js package/LICENSE package/package.json
+          '';
           cli = pkgs.stdenv.mkDerivation (
             sources
             // {
@@ -85,6 +101,7 @@
                   ./src
                   ./tests
                   ./examples
+                  ./themes
                   ./config.nims
                   ./isonim_blog.nimble
                   ./LICENSE
@@ -92,6 +109,8 @@
               };
               nativeBuildInputs = [
                 pkgs.nim
+                # test_theme_format reads the theme's Nimble package (`nimble dump`).
+                pkgs.nimble
                 pkgs.nodejs
                 pkgs.python3
                 pkgs.makeWrapper
@@ -112,10 +131,10 @@
               checkPhase = ''
                 runHook preCheck
                 export HOME="$TMPDIR"
-                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds test_static_images test_static_ogimage test_check test_serve_reload; do
+                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds test_static_images test_static_ogimage test_check test_serve_reload test_theme_format test_theme_override test_theme_kit; do
                   nim c -r --out:build/tests/$suite --nimcache:build/nimcache/$suite tests/$suite.nim
                 done
-                for suite in test_plumbing test_model_pure; do
+                for suite in test_plumbing test_model_pure test_theme_format; do
                   nim js -d:nodejs --out:build/tests/$suite.js --nimcache:build/nimcache/$suite-js tests/$suite.nim
                   node build/tests/$suite.js
                 done
@@ -182,6 +201,12 @@
           devShells.default = pkgs.mkShell (
             sources
             // {
+              # The theme conformance kit's browser checks: Playwright's
+              # Chromium from nixpkgs (never downloaded) and the pinned axe-core.
+              PLAYWRIGHT_CORE_PATH = "${pkgs.playwright-driver}";
+              PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+              PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+              ISONIM_BLOG_AXE = "${axeCore}";
               inputsFrom = [ config.pre-commit.devShell ];
               packages = with pkgs; [
                 nim
@@ -211,6 +236,43 @@
             }
             // pkgs.lib.optionalAttrs (self ? rev) { inherit (self) rev; };
           };
+          # The shipped theme, found by its package name as a new site names it
+          # (`theme = "isonim-blog-theme-minimal"`), builds the theme
+          # conformance fixture in the sandbox: its token and theme
+          # stylesheets are linked, theme-color follows both schemes, and
+          # the output is byte-reproducible (`--rebuild`).
+          checks.theme-minimal =
+            let
+              src = pkgs.runCommand "isonim-blog-theme-conformance-src" { } ''
+                cp -R ${./tests/fixtures/theme-conformance} "$out"
+                chmod -R u+w "$out"
+                { echo 'theme = "isonim-blog-theme-minimal"'; cat ${./tests/fixtures/theme-conformance/site.toml}; } > "$out/site.toml"
+              '';
+              site = self.lib.${system}.buildSite {
+                src = {
+                  outPath = src;
+                  lastModified = 1735689600;
+                };
+              };
+            in
+            pkgs.runCommand "isonim-blog-theme-minimal-check" { nativeBuildInputs = [ pkgs.jq ]; } ''
+              set -euo pipefail
+              page=${site}/posts/every-prose-feature/index.html
+              tokens="$(jq -r '."assets/theme-tokens.css"' ${site}/asset-manifest.json)"
+              css="$(jq -r '."assets/minimal.css"' ${site}/asset-manifest.json)"
+              grep -qF "<link rel=\"stylesheet\" href=\"/$tokens\"><link rel=\"stylesheet\" href=\"/$css\">" "$page"
+              cmp ${./themes/minimal/assets/minimal.css} "${site}/$css"
+              grep -q -- '--sys-color-surface: #ffffff;' "${site}/$tokens"
+              grep -q -- '--sys-color-surface: #111316;' "${site}/$tokens"
+              grep -qF '<meta name="theme-color" content="#111316" media="(prefers-color-scheme: dark)" />' "$page"
+              grep -q 'class="skip-link"' "$page"
+              grep -q '<label><input type="checkbox" disabled checked> Write the content</label>' "$page"
+              test "$(jq -r '.components[1].name' ${site}/build.json)" = theme
+              case "$(jq -r '.components[1].revision' ${site}/build.json)" in sha256-*) ;; *) exit 1 ;; esac
+              if grep -rl --include='*.html' '<script src=' ${site}; then exit 1; fi
+              test -z "$(find ${site} -name '*.js')"
+              mkdir "$out"
+            '';
           # The wrapper's arguments reach the build: a theme's assets and
           # identity, drafts with noindex, and the canonical origin.
           checks.build-site-contract =

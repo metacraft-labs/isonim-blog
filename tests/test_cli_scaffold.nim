@@ -56,6 +56,8 @@ suite "new site":
     check config.title == "Field Notes"
     check config.url == "https://example.org"
     check config.indexPermalink == "/"
+    # The default theme, by its package name.
+    check config.theme == "isonim-blog-theme-minimal"
     # The flake pins the commit the CLI was built from.
     let flake = readFile(site / "flake.nix")
     check flake.contains("isonim-blog.url = \"github:metacraft-labs/isonim-blog/" & testRevision & "\";")
@@ -77,6 +79,10 @@ suite "new site":
     check home.contains("Hello, world")
     check home.contains("/posts/hello-world/")
     check readFile(site / "public/posts/hello-world/index.html").contains("This is the first post.")
+    # Rendered by the minimal theme, with its stylesheets.
+    check home.contains("<a class=\"skip-link\" href=\"#content\">")
+    check home.contains("/assets/minimal.")
+    check home.contains("/assets/theme-tokens.")
     # The generated .gitignore keeps the output and the build cache out of git.
     gitCommitAll(site, "Start")
     let status = runProcess(tool("git"), ["-C", site, "status", "--porcelain", "--ignored"])
@@ -104,7 +110,7 @@ suite "new site":
     check cli("new", "site", work / "pinned", "--theme", "themes/plain").exitCode == 0
     check readFile(work / "pinned/flake.nix").contains(
       "isonim-blog.url = \"github:metacraft-labs/isonim-blog/" & revision.toLowerAscii & "\";")
-    check readSiteConfig(work / "pinned").theme == "themes/plain"
+    check readSiteToml(work / "pinned")["theme"].getStr == "themes/plain"
     # A dirty, malformed or missing revision names no commit the site could
     # build against: new site refuses, saying how to fix it, and creates nothing.
     for value in [revision & "-dirty", "unknown", revision[0 .. 38], ""]:
@@ -212,6 +218,11 @@ suite "the generated flake":
     check output.startsWith("/nix/store/")
     check readFile(output / "index.html").contains("Hello, world")
     check fileExists(output / "posts/hello-world/index.html")
+    # The flake resolved the default theme by its package name.
+    check readFile(output / "index.html").contains("<a class=\"skip-link\" href=\"#content\">")
+    let manifest = parseFile(output / "asset-manifest.json")
+    check readFile(output / manifest["assets/minimal.css"].getStr) ==
+      readFile(repoRoot / "themes/minimal/assets/minimal.css")
     let info = parseFile(output / "build.json")
     check info["sourceRevision"].getStr == commit
     check info["outputHash"].getStr.startsWith("sha256-")

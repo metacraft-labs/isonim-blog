@@ -1,7 +1,8 @@
 ## Native input boundary. Only named input directories are traversed. Symlinks
 ## are refused instead of following paths outside a site's declared inputs.
 import std/[os, osproc, streams, strutils, algorithm, json, times, tables, strtabs]
-import ./[model, archives]
+import ./[model, archives, theme_format]
+export theme_format
 import isonim/static/buildinfo
 
 const tomlDecoder = """
@@ -82,17 +83,172 @@ proc inputFiles*(dir: string): seq[string] =
       else: fail("input symlinks are not supported: " & child)
   result.sort()
 
-proc readSiteConfig*(root: string): SiteConfig =
+proc readSiteToml*(root: string): JsonNode =
+  ## The decoded `site.toml` of the site at `root`, before theme defaults.
   let path = root / "site.toml"
   if symlinkExists(path): fail("input symlinks are not supported: " & path)
   if not fileExists(path): fail("missing site.toml in " & root)
-  var decoded = readToml(path)
+  result = readToml(path)
   # A root table with a literal "$toml" key arrives tagged; unwrap it so the
   # configuration keeps every key, including that one, as an ordinary key.
-  if decoded.kind == JObject and decoded.getOrDefault("$toml") == %"table" and
-      decoded.len == 2 and decoded.hasKey("value"):
-    decoded = decoded["value"]
-  parseConfig(decoded)
+  if result.kind == JObject and result.getOrDefault("$toml") == %"table" and
+      result.len == 2 and result.hasKey("value"):
+    result = result["value"]
+  if result.kind != JObject: fail("site.toml must be a table")
+
+# -- Themes -------------------------------------------------------------------
+#
+# A theme is named in site.toml by path (`themes/plain`, relative to the
+# site, or absolute) or by package name (`isonim-blog-theme-minimal`). A
+# package is looked up in the directories of ISONIM_BLOG_THEME_PATH (a
+# site's flake or a Nimble install provides them), then among the themes
+# this framework ships (`themes/` of ISONIM_BLOG_SRC, which the dev shell,
+# the packaged CLI and the Nix builder set).
+
+const shippedThemePrefix* = "isonim-blog-theme-"
+
+proc isThemePath*(value: string): bool =
+  ## Whether a `theme` value names a directory rather than a package.
+  value.contains('/') or value.contains('\\') or value.startsWith(".") or value.isAbsolute
+
+proc themeSearchDirs*(): seq[string] =
+  ## Where package-named themes are looked up, in order.
+  for dir in getEnv("ISONIM_BLOG_THEME_PATH").split(PathSep):
+    if dir.len > 0: result.add dir
+  let framework = getEnv("ISONIM_BLOG_SRC")
+  if framework.len > 0: result.add framework / "themes"
+
+proc readThemeManifest*(theme: string): ThemeManifest =
+  ## The validated `theme.toml` of the theme at `theme`, with the files it
+  ## names checked: token documents and stylesheets must be regular files
+  ## of the theme, and the generated token stylesheet's path is reserved.
+  let path = theme / themeManifestName
+  if symlinkExists(path): fail("input symlinks are not supported: " & path)
+  if not fileExists(path): fail("a theme needs a " & themeManifestName & ": " & path & " does not exist")
+  try: result = parseThemeManifest(readToml(path))
+  except BlogError as cause: fail(path & ": " & cause.msg.replace("theme.toml: ", ""))
+  for rel in result.tokenFiles & result.stylesheets:
+    if symlinkExists(theme / rel): fail("input symlinks are not supported: " & theme / rel)
+    if not fileExists(theme / rel): fail(path & ": names " & rel & ", which the theme does not have")
+  if fileExists(theme / tokenStylesheetPath) or symlinkExists(theme / tokenStylesheetPath):
+    fail(theme / tokenStylesheetPath & ": this path is generated from the theme's tokens; a theme cannot ship it")
+
+proc findThemePackage*(name: string): string =
+  ## The directory of the theme package `name`: a search directory that is
+  ## itself the theme, or holds it as `<name>/` or (for this framework's
+  ## naming) `<name without isonim-blog-theme->/`. The first match wins; a
+  ## candidate whose theme.toml names another package is an error.
+  if not validThemeName(name): fail("invalid theme package name: " & name)
+  var candidates: seq[tuple[path: string, named: bool]]
+  for dir in themeSearchDirs():
+    candidates.add (dir, false)
+    candidates.add (dir / name, true)
+    if name.startsWith(shippedThemePrefix) and name.len > shippedThemePrefix.len:
+      candidates.add (dir / name[shippedThemePrefix.len .. ^1], true)
+  for (candidate, named) in candidates:
+    if not fileExists(candidate / themeManifestName): continue
+    let found = readThemeManifest(candidate).name
+    if found == name: return absolutePath(candidate)
+    # A directory named after the package that is another package is a
+    # mistake worth naming; a search directory that is some other theme
+    # is simply not this one.
+    if named: fail(candidate & ": its theme.toml names " & found & ", not " & name)
+  fail("theme package " & name & " not found in " &
+    (if candidates.len == 0: "(no search directories)" else: themeSearchDirs().join(", ")) &
+    ". Name a theme directory by path in site.toml, or add the package's directory " &
+    "to ISONIM_BLOG_THEME_PATH (a site flake input, or `nimble path <package>`)")
+
+proc resolveTheme*(root: string; explicit = ""): string =
+  ## The absolute directory of the site's theme, or "" without one.
+  ## `explicit` (the Nix builder's `theme` argument) replaces the lookup of
+  ## site.toml's value; a package-named site then still checks that the
+  ## given theme is that package.
+  let configured = readSiteToml(root).stringValue("theme")
+  if explicit.len > 0:
+    result = absolutePath(explicit)
+    if not dirExists(result): fail("theme path does not exist: " & explicit)
+    if configured.len > 0 and not isThemePath(configured):
+      let found = readThemeManifest(result).name
+      if found != configured:
+        fail("site.toml names theme " & configured & ", but the theme given is " & found)
+    return
+  if configured.len == 0: return ""
+  if isThemePath(configured):
+    result = if configured.isAbsolute: configured else: root / configured
+    if not dirExists(result): fail("theme path does not exist: " & configured)
+    result = absolutePath(result)
+  else:
+    result = findThemePackage(configured)
+
+proc readSiteConfig*(root: string; theme = ""): SiteConfig =
+  ## The site's configuration: `site.toml` over its theme's defaults, with
+  ## the keys the theme requires checked. `theme` is a resolved theme
+  ## directory, or "" to resolve the one site.toml names.
+  let raw = readSiteToml(root)
+  let directory = if theme.len > 0: theme else: resolveTheme(root)
+  if directory.len == 0: return parseConfig(raw)
+  let manifest = readThemeManifest(directory)
+  let merged = mergeDefaults(raw, manifest.config)
+  requireKeys(merged, manifest)
+  parseConfig(merged)
+
+proc themeTokenDocuments*(theme: string; manifest: ThemeManifest): seq[string] =
+  for rel in manifest.tokenFiles: result.add readFile(theme / rel)
+
+proc loadThemeInfo*(theme: string): (ThemeManifest, ThemeInfo) =
+  ## The manifest and the layout-facing record of the theme at `theme`.
+  let manifest = readThemeManifest(theme)
+  var info = ThemeInfo(name: manifest.name, version: manifest.version)
+  try: info.tokens = themeTokens(themeTokenDocuments(theme, manifest))
+  except BlogError as cause: fail(theme / themeManifestName & ": " & cause.msg)
+  (manifest, info)
+
+proc themeFiles*(theme: string): seq[string] =
+  ## Every file of a theme a build may read, sorted: theme.toml, the token
+  ## documents it names, og.svg.nim, and layouts/, includes/ and assets/.
+  let manifest = readThemeManifest(theme)
+  result.add theme / themeManifestName
+  for rel in manifest.tokenFiles: result.add theme / rel
+  if symlinkExists(theme / "og.svg.nim"): fail("input symlinks are not supported: " & theme / "og.svg.nim")
+  if fileExists(theme / "og.svg.nim"): result.add theme / "og.svg.nim"
+  for dir in themeFileDirs:
+    for file in inputFiles(theme / dir):
+      if file notin result: result.add file
+  result.sort()
+
+proc themeTreeHash*(theme: string): string =
+  ## Identity of a theme directory: the content of every file it can
+  ## contribute to a build (`themeFiles`), by relative path.
+  var files: seq[tuple[path, content: string]]
+  for file in themeFiles(theme):
+    files.add (relativePath(file, theme).replace('\\', '/'), readFile(file))
+  treeHashOf(files)
+
+proc ejectThemeFile*(root, file: string): string =
+  ## Copy one file of the site's theme into the site at the same path, where
+  ## it now wins over the theme's (§7). Returns the site-relative path. Only
+  ## files that resolve against the site's can be ejected (layouts/,
+  ## includes/, assets/ and og.svg.nim); an existing site file is never
+  ## overwritten. Deleting the copy restores the theme's file.
+  let theme = resolveTheme(root)
+  if theme.len == 0: fail("site.toml names no theme to eject from")
+  var rel = file.replace('\\', '/')
+  while rel.startsWith("./"): rel = rel[2..^1]
+  let parts = rel.split('/')
+  if rel.len == 0 or rel.isAbsolute or ".." in parts or "" in parts or "." in parts:
+    fail("eject takes a path inside the theme, such as layouts/post.nim: " & file)
+  if rel != "og.svg.nim" and (parts.len < 2 or parts[0] notin themeFileDirs):
+    fail("only layouts/, includes/, assets/ and og.svg.nim resolve against the site; cannot eject " & rel)
+  let source = theme / rel
+  if symlinkExists(source): fail("input symlinks are not supported: " & source)
+  if not fileExists(source):
+    fail("the theme has no " & rel & (if dirExists(source): " file (it is a directory)" else: ""))
+  let target = root / rel
+  if fileExists(target) or symlinkExists(target) or dirExists(target):
+    fail(rel & " already exists in the site, where it already overrides the theme's")
+  createDir(parentDir(target))
+  copyFile(source, target)
+  rel
 
 proc siteInputFiles*(root: string; config: SiteConfig; options: BuildOptions): seq[string] =
   ## Every file a build may read from the site: site.toml, the OpenGraph
@@ -106,16 +262,6 @@ proc siteInputFiles*(root: string; config: SiteConfig; options: BuildOptions): s
   for name in config.collections.keys: dirs.add "collections" / name
   for dir in dirs: result.add inputFiles(root / dir)
   result.sort()
-
-proc themeTreeHash*(theme: string): string =
-  ## Identity of a path-named theme: its layouts, includes, assets and
-  ## OpenGraph template.
-  var files: seq[tuple[path, content: string]]
-  if fileExists(theme / "og.svg.nim"): files.add ("og.svg.nim", readFile(theme / "og.svg.nim"))
-  for dir in ["layouts", "includes", "assets"]:
-    for file in inputFiles(theme / dir):
-      files.add (relativePath(file, theme).replace('\\', '/'), readFile(file))
-  treeHashOf(files)
 
 proc buildEpoch*(root: string; sources: openArray[string]): int64 =
   ## SOURCE_DATE_EPOCH wins in sandboxes. Local previews use the latest input
@@ -131,7 +277,13 @@ proc civilDate*(epoch: int64; zone: string): string =
   runPython(["-c", code, $epoch, zone]).strip()
 
 proc loadSite*(root: string; options = BuildOptions()): Site =
-  result.config = readSiteConfig(root)
+  ## The site's content and configuration (over its theme's defaults), with
+  ## the theme's resolved tokens; asset and stylesheet URLs are filled in by
+  ## the export, which fingerprints the files.
+  let theme = resolveTheme(root, options.theme)
+  result.config = readSiteConfig(root, theme)
+  if theme.len > 0: result.theme = loadThemeInfo(theme)[1]
+  else: result.theme.tokens = newJObject()
   if options.url.len > 0:
     var overrideConfig = %*{"title": result.config.title, "url": options.url}
     result.config.url = parseConfig(overrideConfig).url

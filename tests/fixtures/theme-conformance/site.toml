@@ -1,0 +1,19 @@
+# The generic fixture of the theme conformance kit (`just test-theme`):
+# content only, no layouts, so every page is rendered by the theme under
+# test. The kit adds `theme = "<path>"` above these lines. It produces every
+# page kind: posts (one a bundle with a hero image), a draft, pages, a
+# collection entry, two index pages, tag, category, year and month pages.
+title = "Conformance Notebook"
+description = "Generic content exercising every feature a theme styles"
+url = "https://example.org"
+language = "en"
+timezone = "UTC"
+paginate = 2
+author = { name = "Example Author", url = "/about/" }
+
+[archives]
+month = "/:year/:month/"
+
+[collections.notes]
+output = true
+permalink = "/notes/:slug/"

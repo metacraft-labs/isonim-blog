@@ -1,0 +1,48 @@
+{
+  "sys": {
+    "color": {
+      "$type": "color",
+      "paper": {
+        "$value": "{ref.color.paper}",
+        "$extensions": {
+          "modes": { "Light": "{ref.color.paper}", "Dark": "{ref.color.night}" }
+        }
+      },
+      "ink": {
+        "$value": "{ref.color.ink}",
+        "$extensions": {
+          "modes": { "Light": "{ref.color.ink}", "Dark": "{ref.color.moon}" }
+        }
+      },
+      "ink-soft": {
+        "$value": "{ref.color.ink-soft}",
+        "$extensions": {
+          "modes": {
+            "Light": "{ref.color.ink-soft}",
+            "Dark": "{ref.color.moon-soft}"
+          }
+        }
+      },
+      "accent": {
+        "$value": "{ref.color.teal-800}",
+        "$extensions": {
+          "modes": {
+            "Light": "{ref.color.teal-800}",
+            "Dark": "{ref.color.teal-200}"
+          }
+        }
+      }
+    },
+    "typography": {
+      "$type": "typography",
+      "$description": "A composite token: available to layouts, not written as a CSS property.",
+      "body": {
+        "$value": {
+          "fontFamily": "serif",
+          "fontSize": "1.1rem",
+          "lineHeight": "1.6"
+        }
+      }
+    }
+  }
+}

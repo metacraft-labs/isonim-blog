@@ -11,7 +11,7 @@ holds `site.toml`.
 ## `new site`
 
 ```sh
-isonim-blog new site <dir> [--theme <path>] [--deploy cloudflare-pages]
+isonim-blog new site <dir> [--theme <name|path>] [--deploy cloudflare-pages]
 ```
 
 Creates `<dir>` (which must not exist, or be empty) with:
@@ -25,8 +25,10 @@ Creates `<dir>` (which must not exist, or be empty) with:
 | `Justfile`                     | `serve`, `build` and `check` recipes                                                                                                                                                                                                                                                                             |
 | `.gitignore`                   | `public/`, `build/`, `result` and the dev-shell caches                                                                                                                                                                                                                                                           |
 
-`--theme <path>` writes `theme = "<path>"` to `site.toml`. `--deploy
-cloudflare-pages` adds the deployment recipe.
+`site.toml` names the theme `isonim-blog-theme-minimal`, the theme isonim-blog
+ships; `--theme <value>` writes another package name or a theme directory
+instead (see [Themes](themes.md)). `--deploy cloudflare-pages` adds the
+deployment recipe.
 
 `new site` needs to know which isonim-blog commit to pin. The packaged CLI
 (`nix run github:metacraft-labs/isonim-blog/<commit>`, or the one in a site's

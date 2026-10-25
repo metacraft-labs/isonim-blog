@@ -57,8 +57,19 @@ type
       ## Generated pages: the posts this page lists, newest first, then slug.
     pageNumber*, pageCount*: int  ## Index pages: 1-based position and total.
     previousPageUrl*, nextPageUrl*: string  ## Index pages: neighbours, or "".
+  ThemeInfo* = object
+    ## The site's theme, as layouts see it; `name` is empty without one.
+    name*, version*: string
+    tokens*: JsonNode
+      ## Resolved design tokens: `{key: {"value": v, "dark": d}}`, `dark`
+      ## only for a token that differs in the dark scheme (theme_format).
+    stylesheets*: seq[string]
+      ## URLs every page links, in order: the generated token stylesheet,
+      ## then the theme's declared stylesheets (a site's file of the same
+      ## path replaces the theme's).
   Site* = object
     config*: SiteConfig
+    theme*: ThemeInfo
     posts*, pages*: seq[Page]
     collections*: OrderedTable[string, seq[Page]]
     tags*, categories*: OrderedTable[string, seq[Page]]

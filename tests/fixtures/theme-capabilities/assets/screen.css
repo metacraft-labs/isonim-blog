@@ -1,0 +1,99 @@
+body {
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+  max-width: 40rem;
+  background: var(--sys-color-paper);
+  color: var(--sys-color-ink);
+  font-family: Georgia, serif;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+a {
+  color: var(--sys-color-accent);
+}
+pre,
+table {
+  overflow-x: auto;
+  max-width: 100%;
+  display: block;
+}
+img,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+.masthead {
+  padding: 1rem 0;
+}
+.colophon {
+  color: var(--sys-color-ink-soft);
+}
+.kind-label,
+.status {
+  color: var(--sys-color-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.kind-essay h1 {
+  font-size: 2.4rem;
+}
+.kind-note h1 {
+  font-size: 1.6rem;
+}
+.layer-switch {
+  border: 1px solid var(--sys-color-ink-soft);
+}
+/* CSS-only state: the details layer shows when its switch is checked. */
+.details {
+  display: none;
+}
+body:has(#layer-details:checked) .details {
+  display: block;
+}
+body:has(#layer-details:checked) .overview {
+  display: none;
+}
+[popover].credits {
+  padding: 1rem;
+  color: var(--sys-color-ink);
+  background: var(--sys-color-paper);
+  border: 1px solid var(--sys-color-ink-soft);
+}
+button {
+  font: inherit;
+  color: var(--sys-color-ink);
+  background: var(--sys-color-paper);
+  border: 1px solid var(--sys-color-ink);
+}
+blockquote {
+  margin: 1.5rem 0;
+  padding-left: 1rem;
+  border-left: 4px solid var(--sys-color-accent);
+  font-size: 1.25rem;
+}
+/* Scroll-driven animation: progress through the page, no script. */
+.reading-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 4px;
+  width: 100%;
+  background: var(--sys-color-accent);
+  transform-origin: 0 50%;
+  animation: reading-progress linear both;
+  animation-timeline: scroll(root);
+}
+@keyframes reading-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reading-progress {
+    animation: none;
+    display: none;
+  }
+}

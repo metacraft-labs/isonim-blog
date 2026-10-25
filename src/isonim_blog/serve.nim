@@ -15,7 +15,7 @@
 ##   page until a later build succeeds.
 import std/[os, asyncdispatch]
 import isonim/server/static_dist_dev_server
-import ./[model, inputs, program]
+import ./[model, inputs]
 
 type
   ServeOptions* = object
@@ -42,10 +42,12 @@ proc rebuildCommand*(options: ServeOptions): seq[string] =
   if options.drafts: result.add "--drafts"
   if options.future: result.add "--future"
 
-proc watchRoots*(root: string; theme = ""): seq[string] =
+proc watchRoots*(root: string; theme = ""; themeExtra: openArray[string] = []): seq[string] =
   ## Everything a build may read: site.toml, og.svg.nim, the declared
-  ## directories and the theme's code and assets. The output and build
-  ## caches are never watched. Collections are covered by `collections/`.
+  ## directories, and the theme's theme.toml, code and assets plus
+  ## `themeExtra` (its token documents, relative to the theme). The output
+  ## and build caches are never watched. Collections are covered by
+  ## `collections/`.
   for name in ["site.toml", "og.svg.nim"]: result.add root / name
   for dir in ["posts", "drafts", "pages", "collections", "layouts", "includes",
       "data", "assets", "static"]:
@@ -53,12 +55,16 @@ proc watchRoots*(root: string; theme = ""): seq[string] =
   if theme.len > 0:
     for dir in ["layouts", "includes", "assets"]: result.add theme / dir
     result.add theme / "og.svg.nim"
+    result.add theme / themeManifestName
+    for rel in themeExtra: result.add theme / rel
 
 proc newSiteDevServer*(root: string; options: ServeOptions): StaticDistDevServer =
   ## The configured server for the site at `root`, without starting it.
+  let theme = resolveTheme(root)
+  let tokenFiles = if theme.len > 0: readThemeManifest(theme).tokenFiles else: @[]
   newStaticDistDevServer(rebuildCommand = rebuildCommand(options),
     distDir = root / "public",
-    watchRoots = watchRoots(root, resolveTheme(root)),
+    watchRoots = watchRoots(root, theme, tokenFiles),
     watchExts = @[],  # every file: static/ may hold _headers or favicon.ico
     siteName = readSiteConfig(root).title)
 

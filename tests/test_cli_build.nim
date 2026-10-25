@@ -27,6 +27,7 @@ proc layout*(page: Page; site: Site; content: string): string =
       h1: text page.title
       raw content
 """)
+  writeFile(theme / "theme.toml", "name = \"plain\"\n")
   writeFile(theme / "assets/site.css", "/* theme default, overridden by the site */\n")
   writeFile(theme / "assets/theme.css", ".theme-note { margin: 0; }\n")
   writeFile(result / "site.toml", "theme = \"themes/plain\"\n" & readFile(result / "site.toml"))
