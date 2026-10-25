@@ -197,9 +197,10 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     headers.add page.url & "\n  Content-Security-Policy: " &
       cspHeaderValue(policy, inlineScriptBodies(keptScripts)) & "\n"
     # The sitemap lists neither drafts and noindex pages nor posts dated
-    # after the build date (present only with --future).
+    # after the build date (present only with --future), nor a listing page
+    # that lists only such posts.
     pages.add SitePage(route: page.url, html: document, lastmod: page.updated,
-      noindex: page.noindex or page.future)
+      noindex: page.noindex or page.future or page.listsOnlyPreviews)
   for (path, content) in siteFeeds(site): addFile(path[1..^1], content, "generated feed " & path)
   let sitemapPath = site.config.basePath & "/sitemap.xml"
   addFile(sitemapPath[1..^1], renderSitemap(sitemapEntriesFor(pages, site.config.url)), "generated sitemap")

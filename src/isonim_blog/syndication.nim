@@ -18,6 +18,15 @@ proc absoluteUrl*(site: Site; path: string): string =
   ## path when it came from a permalink).
   if path.len == 0: "" else: resolveUrl(siteRoot(site), path)
 
+proc configuredUrl*(site: Site; reference: string): string =
+  ## A URL written in site.toml, made absolute. A root-relative reference
+  ## there names a path of the site, so it is placed under the base path
+  ## (`/about/` is `<origin><base_path>/about/`); an absolute or a
+  ## protocol-relative URL is kept as written.
+  if reference.len > 0 and reference[0] == '/' and not reference.startsWith("//"):
+    absoluteUrl(site, site.config.basePath & reference)
+  else: absoluteUrl(site, reference)
+
 proc feedPosts*(site: Site): seq[Page] =
   ## The posts a feed may carry: never a draft (even in a `--drafts`
   ## preview) and never a post dated after the build date (even with
@@ -33,7 +42,7 @@ proc authorPerson(site: Site): FeedPerson =
   result.name = author.stringValue("name")
   if result.name.len == 0: result.name = site.config.title
   let url = author.stringValue("url")
-  if url.len > 0: result.uri = absoluteUrl(site, url)
+  if url.len > 0: result.uri = configuredUrl(site, url)
   result.email = author.stringValue("email")
 
 proc feedEntry(site: Site; post: Page): FeedEntry =
@@ -74,7 +83,8 @@ proc siteFeeds*(site: Site): seq[tuple[path, content: string]] =
       var entries: seq[Page]
       for post in tagged:
         if not post.draft and not post.future: entries.add post
-      result.add (path, renderAtom(buildFeed(site, entries, config.title & " — " & tag,
+      result.add (path, renderAtom(buildFeed(site, entries,
+        config.title & " — " & termTitle(site, "tags", tag),
         absoluteUrl(site, tagUrl(site, tag)), absoluteUrl(site, path))))
 
 proc feedLinksHtml*(site: Site; page: Page): string =
@@ -92,7 +102,7 @@ proc feedLinksHtml*(site: Site; page: Page): string =
     let path = tagFeedUrl(site, page.term)
     if path.len > 0:
       result.add feedLinkHtml(absoluteUrl(site, path), atomMediaType,
-        config.title & " — " & page.term & " (Atom)")
+        config.title & " — " & termTitle(site, "tags", page.term) & " (Atom)")
 
 proc personJson(site: Site): JsonNode =
   let person = authorPerson(site)

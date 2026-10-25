@@ -155,6 +155,14 @@ suite "navigation, listings and feeds":
     check generated[9].listing.mapIt(it.slug) == @["a", "b"]
     check generated[9].kind == pkYear and generated[9].term == "2020"
     check generated[4].updated == "2022-05-06"
+    # A listing's updated date and sitemap presence ignore previews: tag x
+    # also lists the future post f and the draft e, and the 2099 archive
+    # lists only f, so it exists only in a --future preview.
+    check generated[3].updated == "2020-01-01"
+    check generated[6].term == "2099" and generated[6].listsOnlyPreviews
+    check generated[6].updated == ""
+    check not generated[2].listsOnlyPreviews and not generated[3].listsOnlyPreviews
+    check generated.filterIt(it.listsOnlyPreviews).len == 1
     # An undated draft is listed by the index and its tags, never by a year.
     check generated.filterIt(it.kind == pkYear).mapIt(it.term) == @["2099", "2022", "2021", "2020"]
     check generated[2].listing.mapIt(it.slug) == @["b", "e"]
@@ -170,7 +178,17 @@ suite "navigation, listings and feeds":
     check "<title>E</title>" notin files[0].content and "<title>F</title>" notin files[0].content
     check files[2].content.count("<entry>") == 2
     check files[1].content.contains("href=&quot;https://example.org/journal/posts/a/&quot;")
-    check files[1].content.contains("<uri>https://example.org/about/</uri>")
+    # The author url "/about/" is a site path, so it sits under base_path.
+    check files[1].content.contains("<uri>https://example.org/journal/about/</uri>")
+    check "<title>Notes — x</title>" in files[2].content
+    # A tag feed takes its title from data/tags.toml when the tag has one.
+    var titled = site
+    titled.data = %*{"tags": {"x": {"title": "Ex"}}}
+    check "<title>Notes — Ex</title>" in siteFeeds(titled)[2].content
+    # An absolute author url is kept as written.
+    var elsewhere = site
+    elsewhere.config.author = %*{"name": "Ada", "url": "https://other.example/ada"}
+    check "<uri>https://other.example/ada</uri>" in siteFeeds(elsewhere)[1].content
     check jsonLdFor(site, site.posts[1], "https://example.org/journal/posts/d/").contains("\"@type\":\"BlogPosting\"")
     let home = Page(url: "/journal/", title: "Home")
     check jsonLdFor(site, home, "https://example.org/journal/").contains("\"@type\":\"WebSite\"")

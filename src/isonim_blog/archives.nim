@@ -34,7 +34,7 @@ proc tagFeedUrl*(site: Site; tag: string): string =
   if page.len == 0 or not page.endsWith("/"): return ""
   page & "atom.xml"
 
-proc termTitle(site: Site; dataKey, term: string): string =
+proc termTitle*(site: Site; dataKey, term: string): string =
   ## A term's display title: `title` from `data/<tags|categories>.toml`
   ## when that file names one, otherwise the term itself.
   if site.data != nil and site.data.kind == JObject and site.data.hasKey(dataKey):
@@ -95,10 +95,28 @@ proc linkNavigation*(site: var Site) =
   site.tags = sortedTerms(tags)
   site.categories = sortedTerms(categories)
 
+proc isPreview*(post: Page): bool =
+  ## A post that exists only in a preview build: a draft (`--drafts`) or a
+  ## post dated after the build date (`--future`).
+  post.draft or post.future
+
 proc newestUpdate(posts: openArray[Page]): string =
+  ## The newest `updated` (or date) among the published posts. Previews do
+  ## not count, so a preview build reports the value production will have.
   for post in posts:
+    if post.isPreview: continue
     let value = if post.updated.len > 0: post.updated else: post.date
     if value > result: result = value
+
+proc listsOnlyPreviews*(page: Page): bool =
+  ## A generated page that lists posts, none of them published. It exists
+  ## only because a preview build included drafts or future posts (a year
+  ## archive of future posts, the last index page of a drafts build), so it
+  ## stays out of the sitemap like the posts it lists.
+  if page.kind == pkContent or page.listing.len == 0: return false
+  for post in page.listing:
+    if not post.isPreview: return false
+  true
 
 proc listingPage(kind: PageKind; layout, url, title, description, term, source: string;
     posts: seq[Page]): Page =

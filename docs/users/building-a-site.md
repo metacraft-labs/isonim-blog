@@ -176,15 +176,19 @@ both. Pointing `index` at `/` makes the post index the home page (remove
 
 - **Feeds.** `feed.xml` (RSS 2.0) and `atom.xml` (Atom) carry every published
   post with its full content, and each tag page has its own Atom feed next to
-  it (`/tags/<tag>/atom.xml`). Every URL in a feed is absolute, including the
+  it (`/tags/<tag>/atom.xml`), titled with the tag's `title` from
+  `data/tags.toml` when it has one. Every URL in a feed is absolute, including the
   links and images inside post content. Every page links the feeds with
   `<link rel="alternate">`, and a tag page also links its own.
 - **Sitemap.** `sitemap.xml` lists every page except drafts, `noindex` pages
   and future-dated posts, with `lastmod` from `updated` (or the date); a
-  listing page's `lastmod` is the newest among its posts. `robots.txt` points
+  listing page's `lastmod` is the newest among its published posts. A listing
+  that lists only drafts or future posts (in a `--drafts` or `--future`
+  preview) is left out too. `robots.txt` points
   to it, unless the site provides its own `static/robots.txt`.
 - **JSON-LD.** A post carries a schema.org `BlogPosting` with the site author
-  as a `Person`; the site root carries a `WebSite`; other pages carry a
+  as a `Person` (a root-relative author `url` is a path under `base_path`);
+  the site root carries a `WebSite`; other pages carry a
   `WebPage` that is part of the `WebSite`.
 
 All three need absolute URLs, so a build without `url` (in `site.toml` or

@@ -114,6 +114,12 @@ suite "feeds":
     check feeds[tagFeed]["link"].getStr == "https://example.org/tags/nim/"
     check feeds[tagFeed]["self"].getStr == "https://example.org/tags/nim/atom.xml"
     check fileExists(output / "tags/web/atom.xml")
+    # A tag feed is titled by the tag's title in data/tags.toml, like its page
+    # (`web` is titled "The web", so the raw tag cannot pass for it).
+    check feeds[tagFeed]["title"].getStr == "Field Notes — Nim"
+    check parseXml(output / "tags/web/atom.xml")[output / "tags/web/atom.xml"]["title"].getStr ==
+      "Field Notes — The web"
+    check readFile(output / "tags/web/index.html").contains("title=\"Field Notes — The web (Atom)\"")
 
   test "every page links the feeds; a tag page links its own":
     putEnv("SOURCE_DATE_EPOCH", "1704067200")
@@ -206,6 +212,27 @@ suite "structured data and sitemap":
     check parseJson(raw)["headline"].getStr == "</script><b>x"
     check jsonLd("/posts/first/")["headline"].getStr == "</script><b>x"
 
+  test "a root-relative author url is a path under the base path":
+    putEnv("SOURCE_DATE_EPOCH", "1704067200")
+    defer: delEnv("SOURCE_DATE_EPOCH")
+    # The fixture's author url is "/about/"; under base_path "/blog" the about
+    # page is /blog/about/, and the author links must say so.
+    let (root, output) = built(setup = proc(root: string) =
+      # A top-level key, so it goes before the file's first table.
+      writeFile(root / "site.toml", "base_path = \"/blog\"\n" & readFile(root / "site.toml")))
+    defer: removeDir(root)
+    # Pages are written under the base path, like their URLs.
+    check fileExists(output / "blog/about/index.html")
+    let first = readFile(output / "blog/posts/first/index.html")
+    check first.contains("https://example.org/blog/posts/first/")
+    let scripts = scriptElements(first)
+      .filterIt(it.attr("type") == "application/ld+json")
+    check scripts.len == 1
+    let ld = parseJson(scripts[0].innerText)
+    check ld["author"]["url"].getStr == "https://example.org/blog/about/"
+    check ld["publisher"]["url"].getStr == "https://example.org/blog/about/"
+    check readFile(output / "blog/atom.xml").contains("<uri>https://example.org/blog/about/</uri>")
+
   test "the sitemap lists indexable pages with lastmod and never drafts or future posts":
     putEnv("SOURCE_DATE_EPOCH", "1704067200")
     defer: delEnv("SOURCE_DATE_EPOCH")
@@ -222,12 +249,21 @@ suite "structured data and sitemap":
     check lastmods["https://example.org/about/"] == ""
     check "https://example.org/posts/work-in-progress/" notin lastmods
     check "https://example.org/posts/future/" notin lastmods
-    # Positive control: both pages were built.
-    check fileExists(output / "posts/work-in-progress/index.html")
-    check fileExists(output / "posts/future/index.html")
+    # A listing that lists only previews is a preview too: the 2099 archive
+    # holds only the future post, and the fourth index page only the
+    # undated draft. Neither page exists in a production build.
+    check "https://example.org/2099/" notin lastmods
+    check "https://example.org/posts/page/4/" notin lastmods
+    # Listing lastmod values come from published posts only: the nim tag
+    # also lists the 2099 post, and the first index page lists it first.
+    check lastmods["https://example.org/tags/nim/"] == "2021-05-05"
+    check lastmods["https://example.org/posts/"] == "2021-05-05"
+    # Positive control: every one of those pages was built.
+    for page in ["posts/work-in-progress", "posts/future", "2099", "posts/page/4"]:
+      check fileExists(output / page / "index.html")
     # 8 indexable content pages (the draft and the future post are not) and
-    # 11 listings: 4 index pages, 2 tags, 2 categories and 3 years.
-    check lastmods.len == 19
+    # 9 listings: 3 index pages, 2 tags, 2 categories and 2 years.
+    check lastmods.len == 17
     check readFile(output / "robots.txt") == "User-agent: *\nAllow: /\nSitemap: https://example.org/sitemap.xml\n"
     # A site's own robots.txt replaces the generated one.
     writeFile(root / "static/robots.txt", "User-agent: *\nDisallow: /\n")
