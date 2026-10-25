@@ -1,8 +1,9 @@
 # Development
 
 The repository supplies the site model and the `build` command described in
-[Building a site](../users/building-a-site.md). Feeds, archives, images, the
-preview server, scaffolding and packaged themes are not implemented yet.
+[Building a site](../users/building-a-site.md), including archives, feeds and
+the sitemap. Images, the preview server, scaffolding and packaged themes are
+not implemented yet.
 Start with the commands in [AGENTS.md](../../AGENTS.md).
 
 ## Source map
@@ -13,8 +14,15 @@ Start with the commands in [AGENTS.md](../../AGENTS.md).
   declared directories and decodes TOML with the pinned Python `tomllib`.
 - `src/isonim_blog/program.nim`: generates the layout program from
   `layouts/` and `includes/` (code only) and compiles it once per source hash.
+- `src/isonim_blog/archives.nim`: backend-independent navigation (previous,
+  next, series), the tag and category indexes and the generated listing pages.
+- `src/isonim_blog/syndication.nim`: backend-independent feeds (through
+  `isonim/static/feeds`), feed discovery links and JSON-LD.
+- `src/isonim_blog/listing.nim`: `ui:` building blocks for listing and post
+  navigation layouts, and the built-in listing layout.
 - `src/isonim_blog/runtime.nim`: what the compiled program runs; it reads the
-  content and exports the site through `isonim/static`.
+  content and exports the site, its feeds and its sitemap through
+  `isonim/static`.
 - `src/isonim_blog_prepare.nim`: the preparation step as a separate tool, used
   by the Reprobuild graph and by the Nix `buildSite` wrapper (`nix/site.nix`).
 - `examples/basic/` is the generic fixture site; `tests/fixtures/` holds a

@@ -27,19 +27,19 @@ suite "native site builds":
     # Positive control: the permission really denies reading (not running as root).
     expect IOError: discard readFile(root / "unrelated/private.md")
     let site = loadSite(root)
-    check site.posts.mapIt(it.slug) == @["bundle", "second", "first"]
-    check site.pages.len == 6
+    check site.posts.mapIt(it.slug) == @["another", "third", "bundle", "second", "first"]
+    check site.pages.len == 8
     check site.collections["notes"].len == 1
     check site.data["navigation"]["items"][0]["url"].getStr == "/about/"
     check site.extra["custom"]["enabled"].getBool
-    check loadSite(root, BuildOptions(drafts: true)).pages.len == 7
+    check loadSite(root, BuildOptions(drafts: true)).pages.len == 9
     # `draft: true` keeps a dated file under posts/ out unless --drafts.
     writeFile(root / "posts/2020-04-04-hidden.md", "---\ntitle: Hidden\ndraft: true\n---\nHidden")
     check not loadSite(root).posts.anyIt(it.slug == "hidden")
     let withDrafts = loadSite(root, BuildOptions(drafts: true))
     check withDrafts.posts.filterIt(it.slug == "hidden").mapIt(it.noindex) == @[true]
     removeFile(root / "posts/2020-04-04-hidden.md")
-    check loadSite(root, BuildOptions(future: true)).posts.len == 4
+    check loadSite(root, BuildOptions(future: true)).posts.len == 6
     let binary = compileSite(root)
     let output = root / "public"
     discard runSite(binary, root, output)

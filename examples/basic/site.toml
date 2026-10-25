@@ -3,6 +3,7 @@ description = "A small technical notebook"
 url = "https://example.org"
 language = "en"
 timezone = "UTC"
+paginate = 2
 author = { name = "Example Author", url = "/about/" }
 custom = { enabled = true, nested = ["one", "two"] }
 [collections.notes]

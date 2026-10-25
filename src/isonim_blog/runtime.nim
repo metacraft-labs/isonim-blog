@@ -1,11 +1,11 @@
 ## Content-only execution of a compiled site's layout registry.
 import std/[os, strutils, json, tables, sets, algorithm]
-import ./[model, inputs, version, html_checks]
+import ./[model, inputs, version, html_checks, archives, listing, syndication]
 import isonim/content/[markdown, prose]
-import isonim/static/[exporter, buildinfo, assets, head, csp]
+import isonim/static/[exporter, buildinfo, assets, head, csp, sitemap, robots]
 import isonim/dsl/ui
 import isonim/ssr/escape
-export model
+export model, listing
 
 proc defaultLayout*(page: Page; site: Site; content: string): string =
   ## A structural fallback for sites that have not provided a layout yet.
@@ -33,8 +33,12 @@ proc applyLayouts*(page: Page; site: Site; layouts: openArray[LayoutEntry]): str
         found = true
         break
     if not found:
-      if name in ["page", "post"] and visited.len == 1:
+      # Built-in structural fallbacks apply only to the page's own layout,
+      # never to a missing parent.
+      if visited.len == 1 and page.kind == pkContent and name in ["page", "post"]:
         return defaultLayout(page, site, result)
+      if visited.len == 1 and page.kind != pkContent:
+        return defaultListLayout(page, site, result)
       fail(page.source & ": missing layout " & name)
 
 proc declaredIslands*(layouts: openArray[LayoutEntry]): seq[Island] =
@@ -63,6 +67,8 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   ## Prepare all output using shared primitives and publish one complete tree.
   validateOutput(root, output)
   var site = loadSite(root, options)
+  if site.config.url.len == 0:
+    fail("url is required (in site.toml or with --url): canonical links, feeds and the sitemap need an absolute origin")
   var files: seq[SiteFile]
   var origins = initTable[string, string]()
   var assetManifest: seq[tuple[original, hashed: string]]
@@ -132,34 +138,45 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     page.content = renderProseHtml(doc)
     if page.toc: page.content = renderTocHtml(doc.headingTree) & page.content
     if page.excerpt.len == 0: page.excerpt = renderProseHtml(doc.excerpt)
+    # Excerpts are shown on listing pages and in feeds, so their links to
+    # bundle resources are rewritten exactly like the full content's.
     for rewrite in rewrites:
       page.content = page.content.replace("\"" & rewrite.original & "\"", "\"" & rewrite.hashed & "\"")
+      page.excerpt = page.excerpt.replace("\"" & rewrite.original & "\"", "\"" & rewrite.hashed & "\"")
   # Layouts receive the same rendered records through all navigation views.
   site.posts.setLen(0)
   site.collections.clear()
+  for name in site.config.collections.keys: site.collections[name] = @[]
   for page in site.pages:
     if page.collection == "posts": site.posts.add page
     elif page.collection.len > 0: site.collections.mgetOrPut(page.collection, @[]).add page
+  # Navigation and listings are built from the rendered records, so listing
+  # layouts and feeds see each post's content and excerpt; linkNavigation
+  # also copies the links onto the matching records of site.pages.
+  linkNavigation(site)
   var pages: seq[SitePage]
   var headers = ""
-  for page in site.pages:
+  for page in site.pages & generatedPages(site):
     if not page.output: continue
     let rel = outputPath(page.url)
     if origins.hasKey(rel.toLowerAscii):
       fail("output collision: " & origins[rel.toLowerAscii] & " and " & page.source)
     origins[rel.toLowerAscii] = page.source
+    let isPost = page.kind == pkContent and page.collection == "posts"
     var documentHead = DocumentHead(title: formatPageTitle(page.title, site.config.title),
       description: page.description, siteName: site.config.title,
       canonicalUrl: if page.canonical.len > 0: page.canonical else: site.config.url & page.url,
-      ogType: if page.collection == "posts": "article" else: "website",
+      ogType: if isPost: "article" else: "website",
       ogImage: page.ogImage)
-    documentHead.jsonLd = articleJsonLd(documentHead, if page.collection == "posts": "BlogPosting" else: "WebSite")
+    documentHead.jsonLd = jsonLdFor(site, page, documentHead.canonicalUrl)
     let bodyHtml = applyLayouts(page, site, layouts)
     let headHtml = renderPageHeadHtml(documentHead, keptScripts, policy = site.config.scriptPolicy)
     let ending = renderBodyEndScriptsHtml(keptScripts, policy = site.config.scriptPolicy)
+    let headExtra = feedLinksHtml(site, page) &
+      (if page.noindex: "<meta name=\"robots\" content=\"noindex\">" else: "")
     let markup = ui:
       html(lang = site.config.language):
-        raw headHtml.replace("</head>", (if page.noindex: "<meta name=\"robots\" content=\"noindex\">" else: "") & "</head>")
+        raw headHtml.replace("</head>", headExtra & "</head>")
         body:
           raw bodyHtml
           raw ending
@@ -179,7 +196,16 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
         if directive.sources.len == 0 and keptScripts.len == 0: directive.sources = @["'none'"]
     headers.add page.url & "\n  Content-Security-Policy: " &
       cspHeaderValue(policy, inlineScriptBodies(keptScripts)) & "\n"
-    pages.add SitePage(route: page.url, html: document, lastmod: page.updated, noindex: page.noindex)
+    # The sitemap lists neither drafts and noindex pages nor posts dated
+    # after the build date (present only with --future).
+    pages.add SitePage(route: page.url, html: document, lastmod: page.updated,
+      noindex: page.noindex or page.future)
+  for (path, content) in siteFeeds(site): addFile(path[1..^1], content, "generated feed " & path)
+  let sitemapPath = site.config.basePath & "/sitemap.xml"
+  addFile(sitemapPath[1..^1], renderSitemap(sitemapEntriesFor(pages, site.config.url)), "generated sitemap")
+  # A site's own static/robots.txt replaces the generated one.
+  if not origins.hasKey("robots.txt"):
+    addFile("robots.txt", renderRobots(site.config.url & sitemapPath), "generated robots.txt")
   if origins.hasKey("_headers"):
     for file in files.mitems:
       if file.path == "_headers": file.content.add "\n" & headers

@@ -102,7 +102,7 @@
               checkPhase = ''
                 runHook preCheck
                 export HOME="$TMPDIR"
-                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build; do
+                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds; do
                   nim c -r --out:build/tests/$suite --nimcache:build/nimcache/$suite tests/$suite.nim
                 done
                 for suite in test_plumbing test_model_pure; do
@@ -218,6 +218,14 @@
               grep -q 'https://preview.example/posts/first/' ${site}/posts/first/index.html
               test ! -e ${site}/posts/future
               test ! -e ${site}/unrelated
+              # A drafts build lists the draft but never feeds or maps it.
+              grep -q '/posts/work-in-progress/' ${site}/tags/nim/index.html
+              test -s ${site}/feed.xml && test -s ${site}/atom.xml && test -s ${site}/tags/nim/atom.xml
+              # (`! grep` would not stop a `set -e` script.)
+              if grep -q 'work-in-progress' ${site}/feed.xml ${site}/atom.xml ${site}/tags/nim/atom.xml ${site}/sitemap.xml; then
+                exit 1
+              fi
+              grep -q 'https://preview.example/posts/second/</loc><lastmod>2020-06-01</lastmod>' ${site}/sitemap.xml
               css="$(jq -r '."assets/theme.css"' ${site}/asset-manifest.json)"
               cmp ${./tests/fixtures/theme/assets/theme.css} "${site}/$css"
               case "$(jq -r '.components[1].revision' ${site}/build.json)" in sha256-*) ;; *) exit 1 ;; esac

@@ -16,24 +16,54 @@ type
     ## they were given, so a nested key this version does not know survives
     ## for layouts; unknown top-level keys are collected in `extra`.
     title*, description*, url*, basePath*, language*, theme*, permalink*, timezone*: string
-    author*, feeds*, taxonomies*, markdown*, images*, output*, analytics*, extra*: JsonNode
+    author*, feeds*, taxonomies*, archives*, markdown*, images*, output*, analytics*, extra*: JsonNode
     collections*: OrderedTable[string, CollectionConfig]
     scriptPolicy*: ScriptPolicy
     paginate*: int
+    indexPermalink*, yearPermalink*, monthPermalink*: string
+      ## Generated listing pages (`[archives]`); "" turns one off.
+    tagPermalink*, categoryPermalink*: string
+      ## One page per term (`[taxonomies]`); "" turns one off.
+    rssPath*, atomPath*: string  ## Feed files (`[feeds]`); "" turns one off.
+    perTagFeeds*, fullContentFeeds*: bool
+  PageKind* = enum
+    ## What produced a page: a content file, or one of the generated listings.
+    pkContent, pkIndex, pkTag, pkCategory, pkYear, pkMonth
+  PageLink* = object
+    ## A reference to another page, for navigation.
+    title*, url*, date*: string
   Page* = object
     source*, title*, description*, date*, updated*, slug*, url*, layout*, collection*: string
     body*, content*, excerpt*, image*, imageAlt*, ogImage*, canonical*, series*: string
     tags*, categories*, redirectFrom*: seq[string]
     seriesOrder*, bodyLine*: int
     draft*, noindex*, toc*, output*: bool
+    future*: bool  ## dated after the build date; present only with --future
     extra*: FrontMatter
+    kind*: PageKind
+    previous*, next*: PageLink
+      ## Posts only: the older and the newer neighbouring post; empty url
+      ## at either end.
+    seriesPosts*: seq[PageLink]
+      ## Posts in a series: the whole series in reading order (series_order,
+      ## then date, then slug), this post included.
+    term*: string
+      ## Generated pages: the tag or category, the year (`2020`) or the
+      ## month (`2020-02`); empty for the index.
+    listing*: seq[Page]
+      ## Generated pages: the posts this page lists, newest first, then slug.
+    pageNumber*, pageCount*: int  ## Index pages: 1-based position and total.
+    previousPageUrl*, nextPageUrl*: string  ## Index pages: neighbours, or "".
   Site* = object
     config*: SiteConfig
     posts*, pages*: seq[Page]
     collections*: OrderedTable[string, seq[Page]]
+    tags*, categories*: OrderedTable[string, seq[Page]]
+      ## Every term in byte order, each with its posts newest first, then slug.
     data*, extra*: JsonNode
     assets*: OrderedTable[string, string]
     sourceDateEpoch*: int64
+    buildDate*: string  ## the build's civil date (YYYY-MM-DD) in site.timezone
     warnings*: seq[string]
   BuildOptions* = object
     drafts*, future*: bool
@@ -94,6 +124,76 @@ proc outputPath*(route: string): string =
   elif value.endsWith(".html"): value[1..^1]
   else: value[1..^1] & "index.html"
 
+proc placeholders*(pattern: string): seq[string] =
+  ## The `:name` placeholders of a permalink pattern, in order.
+  var i = 0
+  while i < pattern.len:
+    if pattern[i] == ':':
+      var j = i + 1
+      while j < pattern.len and pattern[j] in {'a'..'z', '_'}: inc j
+      result.add pattern[i + 1 ..< j]
+      i = j
+    else: inc i
+
+proc expandPattern*(pattern: string; values: openArray[(string, string)]): string =
+  ## Substitute the placeholders a generated page supports; any other is an
+  ## error, so a misspelt placeholder cannot silently become literal text.
+  var i = 0
+  while i < pattern.len:
+    if pattern[i] != ':':
+      result.add pattern[i]
+      inc i
+      continue
+    var j = i + 1
+    while j < pattern.len and pattern[j] in {'a'..'z', '_'}: inc j
+    let key = pattern[i + 1 ..< j]
+    var found = false
+    for (name, value) in values:
+      if name == key:
+        result.add value
+        found = true
+        break
+    if not found: fail("unsupported placeholder :" & key & " in " & pattern)
+    i = j
+  result = cleanRoute(result)
+
+proc feedPath*(path: string): string =
+  ## A feed file path: absolute, a file (no trailing slash), no dot segments
+  ## or unsafe characters. "" turns the feed off.
+  if path.len == 0: return ""
+  if path[0] != '/' or path.endsWith("/") or path.startsWith("//"):
+    fail("a feed path must be a file path starting with one slash: " & path)
+  if path.contains({'\\', '?', '#', '%', ':', '\0'..' '}): fail("invalid character in feed path: " & path)
+  for part in path[1..^1].split('/'):
+    if part in ["", ".", ".."]: fail("unsafe feed path segment: " & path)
+  path
+
+proc termPermalink(taxonomies: JsonNode; name, default: string): string =
+  ## `[taxonomies] tags = { permalink = "/tags/:name/" }`; "" turns it off.
+  let table = taxonomies.objectValue(name)
+  result = table.stringValue("permalink", default)
+  if result.len == 0: return
+  let used = placeholders(result)
+  if used.len != 1 or used[0] notin ["name", "slug"]:
+    fail("taxonomies." & name & ".permalink needs exactly one :name placeholder: " & result)
+  discard expandPattern(result, [("name", "x"), ("slug", "x")])
+
+proc archivePattern(archives: JsonNode; key, default: string; required: openArray[string]): string =
+  ## `[archives] index | year | month`; "" turns a listing off. Each
+  ## pattern must use exactly the placeholders that tell its pages apart.
+  result = archives.stringValue(key, default)
+  if result.len == 0: return
+  var used = placeholders(result)
+  used.sort()
+  var wanted = @required
+  wanted.sort()
+  if used != wanted:
+    fail("archives." & key & " must use " &
+      (if wanted.len == 0: "no placeholders" else: ":" & wanted.join(" and :")) & ": " & result)
+  var values: seq[(string, string)]
+  for name in required: values.add (name, "00")
+  discard expandPattern(result, values)
+
 proc parseConfig*(node: JsonNode): SiteConfig =
   ## Map decoded TOML without throwing away unknown top-level values.
   if node.kind != JObject: fail("site.toml must be a table")
@@ -125,6 +225,18 @@ proc parseConfig*(node: JsonNode): SiteConfig =
   of "none": result.scriptPolicy = spNone
   of "islands": result.scriptPolicy = spDeclared
   else: fail("output.scripts must be none or islands")
+  # Feeds, taxonomies and archives: typed settings with unknown keys kept.
+  let feeds = result.feeds
+  result.rssPath = feedPath(feeds.stringValue("rss", "/feed.xml"))
+  result.atomPath = feedPath(feeds.stringValue("atom", "/atom.xml"))
+  result.perTagFeeds = feeds.boolValue("per_tag", true)
+  result.fullContentFeeds = feeds.boolValue("full_content", true)
+  result.tagPermalink = termPermalink(result.taxonomies, "tags", "/tags/:name/")
+  result.categoryPermalink = termPermalink(result.taxonomies, "categories", "/categories/:name/")
+  result.archives = node.objectValue("archives")
+  result.indexPermalink = archivePattern(result.archives, "index", "/posts/", [])
+  result.yearPermalink = archivePattern(result.archives, "year", "/:year/", ["year"])
+  result.monthPermalink = archivePattern(result.archives, "month", "", ["year", "month"])
   result.paginate = 10
   if node.hasKey("paginate"):
     if node["paginate"].kind != JInt or node["paginate"].getInt <= 0:
@@ -148,7 +260,7 @@ proc parseConfig*(node: JsonNode): SiteConfig =
   for key, value in node:
     if key notin ["title", "description", "url", "base_path", "language", "theme",
         "permalink", "timezone", "author", "feeds", "taxonomies", "collections",
-        "markdown", "images", "output", "paginate"]:
+        "archives", "markdown", "images", "output", "paginate"]:
       result.extra[key] = value.copy
 
 proc validDate*(value: string): string =

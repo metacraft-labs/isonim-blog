@@ -1,7 +1,7 @@
 ## Native input boundary. Only named input directories are traversed. Symlinks
 ## are refused instead of following paths outside a site's declared inputs.
 import std/[os, osproc, streams, strutils, algorithm, json, times, tables, strtabs]
-import ./model
+import ./[model, archives]
 import isonim/static/buildinfo
 
 const tomlDecoder = """
@@ -134,6 +134,8 @@ proc loadSite*(root: string; options = BuildOptions()): Site =
   result.data = newJObject()
   result.assets = initOrderedTable[string, string]()
   result.collections = initOrderedTable[string, seq[Page]]()
+  # Every declared collection is present, in name order, even when empty.
+  for name in result.config.collections.keys: result.collections[name] = @[]
   var sources: seq[string]
   for dir in ["posts", "pages", "data", "assets", "static"]:
     sources.add inputFiles(root / dir)
@@ -142,6 +144,7 @@ proc loadSite*(root: string; options = BuildOptions()): Site =
     sources.add inputFiles(root / "collections" / name)
   result.sourceDateEpoch = buildEpoch(root, sources)
   let today = civilDate(result.sourceDateEpoch, result.config.timezone)
+  result.buildDate = today
   var pages: seq[Page]
   for path in sources:
     let rel = relativePath(path, root).replace('\\', '/')
@@ -176,14 +179,15 @@ proc loadSite*(root: string; options = BuildOptions()): Site =
       var page = pageFromSource(rel, readFile(path), collection, pattern, draft)
       page.output = output
       if page.draft and not options.drafts: continue
-      if page.date.len > 0 and page.date > today and not options.future: continue
+      if page.date.len > 0 and page.date > today:
+        if not options.future: continue
+        page.future = true
       page.url = cleanRoute(result.config.basePath & page.url)
       if page.description.len == 0 or page.description.len > 160:
         result.warnings.add rel & ": description is missing or exceeds 160 characters"
       pages.add page
     except CatchableError as cause: fail(rel & ": " & cause.msg)
   pages.sortPages()
-  checkCollisions(pages)
   for page in pages:
     if result.data.hasKey("tags"):
       for tag in page.tags:
@@ -191,3 +195,7 @@ proc loadSite*(root: string; options = BuildOptions()): Site =
     if page.collection == "posts": result.posts.add page
     elif page.collection.len > 0: result.collections.mgetOrPut(page.collection, @[]).add page
     result.pages.add page
+  linkNavigation(result)
+  # Generated listing pages share the URL space: a collision with a content
+  # page or between two terms is an error naming both sources.
+  checkCollisions(pages & generatedPages(result))

@@ -48,7 +48,8 @@ package isonim_blog:
       actionId = "isonim-blog.test-js-run")
     var testRuns = @[nativeRun, javascriptRun]
     var testBuilds = @[native.action, javascript]
-    for name in ["test_model_pure", "test_site_model", "test_zero_js_default", "test_cli_build"]:
+    for name in ["test_model_pure", "test_site_model", "test_zero_js_default", "test_cli_build",
+        "test_taxonomies", "test_feeds"]:
       let compiled = buildNimUnittest.build(
         source = "tests/" & name & ".nim", binary = "build/tests/" & name,
         nimcache = "build/nimcache/" & name, warningsOff = false,

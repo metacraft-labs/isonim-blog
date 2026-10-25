@@ -2,7 +2,8 @@
 
 This public repository is a static-blog framework on IsoNim. The CLI
 implements `build` (see `docs/users/building-a-site.md`), `--help` and
-`--version`; feeds, archives, images, `serve`, `new` and themes are later work.
+`--version`, with archives, feeds and the sitemap; images, `serve`, `new` and
+themes are later work.
 
 Enter this repository's `nix develop` shell before running commands:
 
@@ -16,8 +17,8 @@ nix build        # CLI package, with every suite run in the sandbox
 just nix-build   # the package plus the sandboxed site-builder checks
 ```
 
-Run the complete suite during development and before every push: five suites
-(17 cases) on C, and the two backend-independent suites (9 cases) on
+Run the complete suite during development and before every push: seven suites
+(29 cases) on C, and the two backend-independent suites (12 cases) on
 JavaScript too. The site suites compile real site programs with the real Nim
 compiler; no browser or server is needed.
 On Linux x86_64, with the site-model changes on top of `c8bfe2f2`, a cold

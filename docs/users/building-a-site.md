@@ -38,24 +38,41 @@ directories are refused rather than followed.
   The build date is `SOURCE_DATE_EPOCH` when it is set; otherwise it is the
   newest modification time among the content files, never the clock, so
   rebuilding the same files gives the same result.
+- Drafts and future-dated posts included by `--drafts` or `--future` appear
+  in listings, but never in feeds or the sitemap.
 
 ## `site.toml`
 
 ```toml
 title = "Field Notes"                 # required
 description = "A small technical notebook"
-url = "https://example.org"           # canonical origin
+url = "https://example.org"           # canonical origin; required to build
 base_path = ""                        # for a site served under a sub-path
 language = "en"
 timezone = "UTC"                      # an IANA zone; decides the build date
 permalink = "/posts/:slug/"           # default for posts
 theme = "themes/plain"                # optional: a theme directory, relative to the site
-paginate = 10
+paginate = 10                         # posts per index page
 author = { name = "Example Author", url = "/about/" }
 
 [collections.notes]
 output = true
 permalink = "/notes/:slug/"
+
+[taxonomies]                          # "" as a permalink turns a listing off
+tags = { permalink = "/tags/:name/" }
+categories = { permalink = "/categories/:name/" }
+
+[archives]
+index = "/posts/"                     # the paginated post index
+year = "/:year/"
+month = ""                            # off by default; e.g. "/:year/:month/"
+
+[feeds]                               # "" as a path turns a feed off
+rss = "/feed.xml"
+atom = "/atom.xml"
+per_tag = true                        # an Atom feed per tag page
+full_content = true                   # false: the excerpt only
 
 [output]
 scripts = "none"                      # "none" (default) or "islands"
@@ -65,8 +82,9 @@ analytics = { provider = "none" }     # "none", "custom" (snippet = "...") or "b
 The file is parsed with Python's standard `tomllib`, so the whole TOML 1.0
 language is accepted. Unknown top-level keys are kept in `site.extra`, and
 unknown keys inside the tables above stay in those tables (`site.config.feeds`,
-`site.config.output`, a collection's `extra`), so a layout can read settings
-this version does not interpret. TOML values with no JSON equivalent arrive as
+`site.config.archives`, `site.config.output`, a collection's `extra`), so a
+layout can read settings this version does not interpret. The values shown are
+the defaults for `[taxonomies]`, `[archives]` and `[feeds]`. TOML values with no JSON equivalent arrive as
 tagged objects: `{"$toml": "datetime" | "date" | "time", "value": "<ISO 8601>"}`,
 `{"$toml": "integer", "value": "<digits>"}` for integers beyond 2^53, and
 `{"$toml": "float", "value": "nan" | "inf" | "-inf"}`. A table that itself has
@@ -76,17 +94,18 @@ a `$toml` key is wrapped as `{"$toml": "table", "value": {...}}`.
 
 Front matter is a YAML subset between `---` lines.
 
-| Key                                                                                             | Meaning                                                                                     |
-| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `title`, `description`                                                                          | Title and meta description; a missing description, or one over 160 characters, is a warning |
-| `date`, `updated`                                                                               | `YYYY-MM-DD`; override the file-name date; `updated` becomes the sitemap `lastmod`          |
-| `slug`, `permalink`                                                                             | Override the URL                                                                            |
-| `layout`                                                                                        | Layout name (default `post` for posts, `page` otherwise)                                    |
-| `tags`, `categories`                                                                            | Lists; when `data/tags.toml` exists, every tag must be declared there                       |
-| `draft`                                                                                         | `true` keeps a file under `posts/` out of builds without `--drafts`                         |
-| `image`, `image_alt`                                                                            | Hero image; the alt text is required when an image is set                                   |
-| `series`, `series_order`, `og_image`, `excerpt`, `toc`, `noindex`, `canonical`, `redirect_from` | Further page settings                                                                       |
-| anything else                                                                                   | Kept unchanged in `page.extra`                                                              |
+| Key                                                                   | Meaning                                                                                     |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `title`, `description`                                                | Title and meta description; a missing description, or one over 160 characters, is a warning |
+| `date`, `updated`                                                     | `YYYY-MM-DD`; override the file-name date; `updated` becomes the sitemap `lastmod`          |
+| `slug`, `permalink`                                                   | Override the URL                                                                            |
+| `layout`                                                              | Layout name (default `post` for posts, `page` otherwise)                                    |
+| `tags`, `categories`                                                  | Lists; when `data/tags.toml` exists, every tag must be declared there                       |
+| `draft`                                                               | `true` keeps a file under `posts/` out of builds without `--drafts`                         |
+| `image`, `image_alt`                                                  | Hero image; the alt text is required when an image is set                                   |
+| `series`, `series_order`                                              | Series navigation: posts sharing `series`, read in `series_order`, then date and slug       |
+| `og_image`, `excerpt`, `toc`, `noindex`, `canonical`, `redirect_from` | Further page settings                                                                       |
+| anything else                                                         | Kept unchanged in `page.extra`                                                              |
 
 ## Permalinks
 
@@ -108,8 +127,15 @@ proc layout*(page: Page; site: Site; content: string): string
 written with IsoNim's `ui:` DSL. It may declare `const parent = "base"`, and
 its output is then passed as `content` to the `base` layout, as in Jekyll.
 Includes are ordinary modules in `includes/` that layouts import. Layouts
-receive `site.posts` and `site.collections` ordered by date (newest first),
-then slug, and `site.data` with every data file.
+receive `site.posts`, `site.tags`, `site.categories` and `site.collections`
+(every declared collection, by name) ordered by date (newest first), then
+slug, and `site.data` with every data file.
+
+A post also carries `page.previous` (the older post) and `page.next` (the
+newer one), and, in a series, `page.seriesPosts` in reading order. The
+`isonim_blog/listing` module renders these for a layout:
+`postNavigationHtml(page)`, `seriesNavigationHtml(page)`,
+`postListHtml(posts)` and `paginationHtml(page)`.
 
 Content is data and layouts are code. `build` generates a small program from
 the layouts and includes of the site and its theme, compiles it once, and runs
@@ -120,6 +146,49 @@ compiler command, but no content. Editing Markdown therefore never recompiles.
 
 A theme directory supplies `layouts/`, `includes/` and `assets/`. The site's
 file wins over the theme's file of the same path.
+
+## Archives and pagination
+
+Every build generates listing pages from the posts, each rendered through a
+layout of its own name:
+
+| Page                     | URL (default)                      | Layout     | `page.term`  |
+| ------------------------ | ---------------------------------- | ---------- | ------------ |
+| Post index, page 1       | `/posts/`                          | `index`    | empty        |
+| Post index, page _n_ > 1 | `/posts/page/<n>/`                 | `index`    | empty        |
+| One per tag              | `/tags/<tag>/`                     | `tag`      | the tag      |
+| One per category         | `/categories/<category>/`          | `category` | the category |
+| One per year             | `/<year>/`                         | `archive`  | `2020`       |
+| One per month (opt-in)   | `/<year>/<month>/` when configured | `archive`  | `2020-02`    |
+
+`page.listing` holds the posts the page lists, newest first, then by slug;
+`page.kind` says which kind of listing it is. Index pages also carry
+`page.pageNumber`, `page.pageCount`, `page.previousPageUrl` (newer posts) and
+`page.nextPageUrl` (older posts), `paginate` posts to a page. Term URLs use
+the term's slug (`Web UI` becomes `web-ui`), and a tag's page title is the
+`title` given for it in `data/tags.toml` when there is one. A site without one
+of these layouts gets a plain built-in list. A generated page whose URL is also
+claimed by a content page, or two terms with the same slug, are an error naming
+both. Pointing `index` at `/` makes the post index the home page (remove
+`pages/index.md` first).
+
+## Feeds, sitemap and structured data
+
+- **Feeds.** `feed.xml` (RSS 2.0) and `atom.xml` (Atom) carry every published
+  post with its full content, and each tag page has its own Atom feed next to
+  it (`/tags/<tag>/atom.xml`). Every URL in a feed is absolute, including the
+  links and images inside post content. Every page links the feeds with
+  `<link rel="alternate">`, and a tag page also links its own.
+- **Sitemap.** `sitemap.xml` lists every page except drafts, `noindex` pages
+  and future-dated posts, with `lastmod` from `updated` (or the date); a
+  listing page's `lastmod` is the newest among its posts. `robots.txt` points
+  to it, unless the site provides its own `static/robots.txt`.
+- **JSON-LD.** A post carries a schema.org `BlogPosting` with the site author
+  as a `Person`; the site root carries a `WebSite`; other pages carry a
+  `WebPage` that is part of the `WebSite`.
+
+All three need absolute URLs, so a build without `url` (in `site.toml` or
+from `--url`) fails.
 
 ## Zero JavaScript by default
 

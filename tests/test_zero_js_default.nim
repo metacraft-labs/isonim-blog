@@ -22,7 +22,9 @@ suite "script policy":
         check executableScripts(html).len == 0
         for script in scriptElements(html): check script.attr("type") == "application/ld+json"
         check eventHandlerAttributes(html).len == 0
-    check pages == 6
+    # 8 content pages and 9 generated listings (3 index pages, 2 tags,
+    # 2 categories, 2 years).
+    check pages == 17
     # Negative control: the islands fixture's layout and island module (the
     # actual IsoNim DSL and hydration API on both halves) replace page.nim.
     let islandsSite = repoRoot / "tests/fixtures/islands-site"
