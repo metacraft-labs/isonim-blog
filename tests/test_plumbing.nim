@@ -20,7 +20,7 @@ suite "bootstrap plumbing":
     check response.output.contains("--version")
     for command in ["new site <dir>", "new post", "new page <path>", "publish-draft <slug>",
         "serve [--drafts] [--future] [--port 4000] [--lan]", "build [--drafts] [--future]",
-        "check [--external]", "--deploy cloudflare-pages"]:
+        "check [--external]", "--deploy cloudflare-pages", "[--now <time>]"]:
       check response.output.contains(command)
     check runCli(newSeq[string]()).output == response.output
 

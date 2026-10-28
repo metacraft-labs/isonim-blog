@@ -35,10 +35,24 @@ directories are refused rather than followed.
 - Drafts are built only with `--drafts`. Draft pages carry
   `<meta name="robots" content="noindex">`, and layouts can show a banner
   through `page.draft`.
-- A post dated after the build date is left out unless `--future` is given.
-  The build date is `SOURCE_DATE_EPOCH` when it is set; otherwise it is the
-  newest modification time among the content files, never the clock, so
-  rebuilding the same files gives the same result.
+- A post dated after "now" is left out unless `--future` is given. "Now" is
+  the build clock: `--now` when it is given (an RFC 3339 date-time with an
+  offset, such as `2026-11-01T00:00:00Z`, or seconds since the Unix epoch
+  after an `@`, such as `@1793491200`), otherwise the current time. A bare
+  number is refused: `--now 20261028` looks like a date but would mean a
+  moment in 1970, so write `--now @20261028` if you mean seconds. The clock
+  must lie between 1970-01-01T00:00:00Z and 9999-12-30T23:59:59Z. A post is future when
+  its date is after the date of "now" in `site.toml`'s `timezone`. The build
+  summary names the clock it used. The Nix build (below) uses the source's
+  commit time instead, so its output does not depend on when it runs.
+- A future-dated post is published by the first build after its date, so a
+  scheduled post needs a scheduled build (see
+  [Scheduled posts](#scheduled-posts)).
+- `SOURCE_DATE_EPOCH` (https://reproducible-builds.org/specs/source-date-epoch/)
+  dates only what the build writes: `sourceDateEpoch` in `build.json` and the
+  date of a feed with no entries. It never decides which posts are published,
+  so the 1980-01-01 that a Nix dev shell sets hides nothing. Without it, the
+  build clock dates the output too.
 - Drafts and future-dated posts included by `--drafts` or `--future` appear
   in listings, but never in feeds or the sitemap.
 
@@ -47,7 +61,7 @@ directories are refused rather than followed.
 ```toml
 title = "Field Notes"                 # required
 description = "A small technical notebook"
-url = "https://example.org"           # canonical origin; required to build
+url = "https://notes.example.net"     # canonical origin; required to build (see below)
 base_path = ""                        # for a site served under a sub-path
 language = "en"
 timezone = "UTC"                      # an IANA zone; decides the build date
@@ -65,7 +79,7 @@ tags = { permalink = "/tags/:name/" }
 categories = { permalink = "/categories/:name/" }
 
 [archives]
-index = "/posts/"                     # the paginated post index
+index = "/"                           # the paginated post index (see below)
 year = "/:year/"
 month = ""                            # off by default; e.g. "/:year/:month/"
 
@@ -160,14 +174,14 @@ wins over the theme's file of the same path, and `isonim-blog theme eject
 Every build generates listing pages from the posts, each rendered through a
 layout of its own name:
 
-| Page                     | URL (default)                      | Layout     | `page.term`  |
-| ------------------------ | ---------------------------------- | ---------- | ------------ |
-| Post index, page 1       | `/posts/`                          | `index`    | empty        |
-| Post index, page _n_ > 1 | `/posts/page/<n>/`                 | `index`    | empty        |
-| One per tag              | `/tags/<tag>/`                     | `tag`      | the tag      |
-| One per category         | `/categories/<category>/`          | `category` | the category |
-| One per year             | `/<year>/`                         | `archive`  | `2020`       |
-| One per month (opt-in)   | `/<year>/<month>/` when configured | `archive`  | `2020-02`    |
+| Page                     | URL (default)                        | Layout     | `page.term`  |
+| ------------------------ | ------------------------------------ | ---------- | ------------ |
+| Post index, page 1       | `/` (or `/posts/`, see below)        | `index`    | empty        |
+| Post index, page _n_ > 1 | `/page/<n>/` (or `/posts/page/<n>/`) | `index`    | empty        |
+| One per tag              | `/tags/<tag>/`                       | `tag`      | the tag      |
+| One per category         | `/categories/<category>/`            | `category` | the category |
+| One per year             | `/<year>/`                           | `archive`  | `2020`       |
+| One per month (opt-in)   | `/<year>/<month>/` when configured   | `archive`  | `2020-02`    |
 
 `page.listing` holds the posts the page lists, newest first, then by slug;
 `page.kind` says which kind of listing it is. Index pages also carry
@@ -177,8 +191,14 @@ the term's slug (`Web UI` becomes `web-ui`), and a tag's page title is the
 `title` given for it in `data/tags.toml` when there is one. A site without one
 of these layouts gets a plain built-in list. A generated page whose URL is also
 claimed by a content page, or two terms with the same slug, are an error naming
-both. Pointing `index` at `/` makes the post index the home page (remove
-`pages/index.md` first).
+both.
+
+Where the post index lives: when `[archives] index` is not set, the paginated
+post list is the home page (`/`, or the `base_path` when one is set), as in
+Jekyll. A content page whose URL is the home page, normally `pages/index.md`,
+takes the home page instead, and the post list moves to `/posts/` (page _n_ at
+`/posts/page/<n>/`). An `index` set in `site.toml` never moves: a content page
+at that URL is an error naming both. `index = ""` turns the post index off.
 
 ## Feeds, sitemap and structured data
 
@@ -200,7 +220,13 @@ both. Pointing `index` at `/` makes the post index the home page (remove
   `WebPage` that is part of the `WebSite`.
 
 All three need absolute URLs, so a build without `url` (in `site.toml` or
-from `--url`) fails.
+from `--url`) fails. `isonim-blog serve` is the exception: without a `url` it
+builds for its own origin, `http://localhost:<port>`. A `url` on a domain
+reserved for examples (`example.com`, `example.net`, `example.org` and their
+subdomains, or any name under `.example`), such as the placeholder that
+`new site` writes, builds with a warning naming it: canonical links, feeds and
+the sitemap would point there. Replace it with the origin the site is deployed
+at.
 
 ## Images and OpenGraph images
 
@@ -284,12 +310,14 @@ fingerprinted bundle, loaded with `defer`.
 ## `isonim-blog build`
 
 ```sh
-isonim-blog build [--drafts] [--future] [--out public] [--url <origin>] [--incremental]
+isonim-blog build [--drafts] [--future] [--now <time>] [--out public] [--url <origin>] [--incremental]
 ```
 
 Run it in the site's directory. It prints whether the site program was
 compiled or reused, then a summary, and exits with status 0 or 1. `--url`
-replaces the canonical origin, for preview deployments. Compiled programs and
+replaces the canonical origin, for preview deployments. `--now` sets the
+build clock that decides which posts are future; with it, rebuilding the same
+files gives the same bytes. Compiled programs and
 their caches live under `build/isonim-blog/`. The output directory is written
 completely before it replaces the previous one, so a failed build leaves the
 last good output in place. It may not overlap the input directories.
@@ -314,16 +342,49 @@ The flake exports `lib.<system>.buildSite`:
 
 ```nix
 isonim-blog.lib.${system}.buildSite {
-  src = self;               # needs lastModified; a flake input or self has it
+  src = self;               # needs lastModified > 0; a flake input or self has it
   theme = null;             # a theme directory or flake input; default: theme in site.toml
   drafts = false;
   url = null;               # overrides url from site.toml
+  now = null;               # the build clock; default: src.lastModified
 }
 ```
 
 It builds the site in the Nix sandbox, with no network and only `site.toml`
-and the declared directories copied in, and with `SOURCE_DATE_EPOCH` taken
-from `src.lastModified`. Nothing in the output depends on the clock and every
-listing is sorted, so `nix build --rebuild` reproduces it byte for byte. It
+and the declared directories copied in. `src.lastModified` is both
+`SOURCE_DATE_EPOCH` and, unless `now` is given, the build clock. For a flake's
+`self` it is the time of the last commit (a dirty tree has its last commit's
+time), so it names the source, not the moment the build ran. `now` takes what
+`--now` takes, or an integer number of seconds. A `src` whose `lastModified` is
+missing or 0 has no known time; rather than build the blog of 1970, with every
+post left out, evaluation fails, unless `now` is given, as an integer, which
+then also dates the output. Nothing in the output depends
+on when or where it is built and every listing is sorted, so
+`nix build --rebuild` reproduces it byte for byte. It
 wraps IsoNim's `buildStaticSite`, which compiles the site program against the
 pinned IsoNim.
+
+## Scheduled posts
+
+A post dated in the future is left out until a build runs whose clock is past
+its date. Nothing publishes it by itself, as with Jekyll and Hugo: a scheduled
+post needs a build, and a deployment, on or after its date.
+
+- `isonim-blog build` uses the current time, so a scheduled job that runs it
+  (once a day, say) and deploys the output publishes each post on its date.
+- The Nix build uses the time of the last commit, so rebuilding the same
+  commit never publishes anything new: that is what keeps it reproducible. A
+  commit made on or after the date publishes the post. To publish on schedule
+  without a commit, give the flake a second package with the current time as
+  its clock and build it from the scheduled job with `--impure` (the current
+  time is not available to a pure evaluation):
+
+  ```nix
+  packages.scheduled = isonim-blog.lib.${system}.buildSite {
+    src = self;
+    now = builtins.currentTime;  # nix build --impure .#scheduled
+  };
+  ```
+
+  Its output depends on the day it is built, so compare such builds by their
+  `build.json`, not by store path.

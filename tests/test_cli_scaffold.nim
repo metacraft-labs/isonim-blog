@@ -24,8 +24,8 @@ proc sortedFiles(root: string): seq[string] =
   for file in walkDirRec(root, relative = true): result.add file.replace('\\', '/')
   result.sort()
 
-# The builds below take "now" from the content, as a build outside a dev shell
-# does (a dev shell exports a placeholder SOURCE_DATE_EPOCH).
+# The builds below run without SOURCE_DATE_EPOCH, as a build outside a dev
+# shell does; posts are judged against the wall clock either way.
 let savedEpoch = getEnv("SOURCE_DATE_EPOCH")
 delEnv("SOURCE_DATE_EPOCH")
 let savedRevision = getEnv("ISONIM_BLOG_REVISION")
@@ -55,7 +55,11 @@ suite "new site":
     let config = readSiteConfig(site)
     check config.title == "Field Notes"
     check config.url == "https://example.org"
+    # The post list is the home page by the default, which a pages/index.md
+    # would move to /posts/; the scaffold sets no [archives] table.
     check config.indexPermalink == "/"
+    check config.indexYields
+    check "\n[archives]" notin readFile(site / "site.toml")
     # The default theme, by its package name.
     check config.theme == "isonim-blog-theme-minimal"
     # The flake pins the commit the CLI was built from.
@@ -75,6 +79,8 @@ suite "new site":
     let built = inDir(site, proc(): CliResult = cli("build"))
     check built.exitCode == 0
     check built.error == ""
+    # The placeholder url builds, with a warning that names it.
+    check built.output.contains("warning: url https://example.org is a placeholder")
     let home = readFile(site / "public/index.html")
     check home.contains("Hello, world")
     check home.contains("/posts/hello-world/")

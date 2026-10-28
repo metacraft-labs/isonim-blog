@@ -16,8 +16,9 @@ const helpText* = """Usage: isonim-blog [--help | --version]
   or:  isonim-blog new post "<title>" [--draft] [--date YYYY-MM-DD] [--bundle]
   or:  isonim-blog new page <path>
   or:  isonim-blog publish-draft <slug>
-  or:  isonim-blog serve [--drafts] [--future] [--port 4000] [--lan]
-  or:  isonim-blog build [--drafts] [--future] [--out public] [--url <origin>] [--incremental]
+  or:  isonim-blog serve [--drafts] [--future] [--port 4000] [--lan] [--now <time>]
+  or:  isonim-blog build [--drafts] [--future] [--now <time>] [--out public] [--url <origin>]
+                        [--incremental]
   or:  isonim-blog check [--external]
   or:  isonim-blog theme eject <file>
 
@@ -32,9 +33,12 @@ directory (the one holding site.toml).
   new page        create pages/<path>.md
   publish-draft   move a draft to posts/, dated today
   serve           build, serve public/ on loopback (--lan: every interface),
-                  rebuild on every change and reload open pages
+                  rebuild on every change and reload open pages; without a
+                  url in site.toml, the build uses http://localhost:<port>
   build           build the site into public/; --incremental rewrites only
-                  changed files (what serve uses)
+                  changed files (what serve uses). A post dated after --now
+                  (an RFC 3339 date-time or @<epoch seconds>; default: the
+                  current time) is future and left out without --future
   check           build as production does and check internal links and
                   anchors, front matter, alt text, scripts and feeds;
                   --external also requests every external link
@@ -60,6 +64,9 @@ when not defined(js):
       of "--incremental": options.incremental = true
       of "--out": options.outDir = valueAfter(args, i)
       of "--url": options.url = valueAfter(args, i)
+      of "--now":
+        options.now = valueAfter(args, i)
+        discard parseBuildClock(options.now)  # refuse a bad value before compiling
       else: fail("unsupported build argument: " & args[i])
       inc i
     buildSite(getCurrentDir(), options)
@@ -117,6 +124,9 @@ when not defined(js):
       of "--drafts": options.drafts = true
       of "--future": options.future = true
       of "--lan": options.lan = true
+      of "--now":
+        options.now = valueAfter(args, i)
+        discard parseBuildClock(options.now)
       of "--port":
         let value = valueAfter(args, i)
         try: options.port = parseInt(value)

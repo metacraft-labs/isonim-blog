@@ -162,7 +162,8 @@ proc runThemeKit*(theme: string; work: string; browser = true): KitReport =
     if previousEpoch.len > 0: putEnv("SOURCE_DATE_EPOCH", previousEpoch)
     else: delEnv("SOURCE_DATE_EPOCH")
   try:
-    discard buildSite(site, BuildOptions(drafts: true, outDir: output))
+    # The fixture is judged at a fixed time, so its posts are the same on any day.
+    discard buildSite(site, BuildOptions(drafts: true, outDir: output, now: "@" & kitEpoch))
     result.add "the fixture builds with the theme"
   except CatchableError as cause:
     result.add "the fixture builds with the theme", cause.msg.strip().splitLines()

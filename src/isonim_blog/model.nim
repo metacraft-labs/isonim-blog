@@ -22,6 +22,10 @@ type
     paginate*: int
     indexPermalink*, yearPermalink*, monthPermalink*: string
       ## Generated listing pages (`[archives]`); "" turns one off.
+    indexYields*: bool
+      ## `[archives] index` was not set, so the index takes the default,
+      ## the home page, and `loadSite` moves it to `yieldedIndexPermalink`
+      ## when a content page (in practice `pages/index.md`) is the home page.
     tagPermalink*, categoryPermalink*: string
       ## One page per term (`[taxonomies]`); "" turns one off.
     rssPath*, atomPath*: string  ## Feed files (`[feeds]`); "" turns one off.
@@ -76,12 +80,22 @@ type
       ## Every term in byte order, each with its posts newest first, then slug.
     data*, extra*: JsonNode
     assets*: OrderedTable[string, string]
+    now*: int64
+      ## The build clock, in seconds since the Unix epoch: a post dated after
+      ## its civil date in `timezone` is future. `BuildOptions.now`, or the
+      ## wall clock.
     sourceDateEpoch*: int64
-    buildDate*: string  ## the build's civil date (YYYY-MM-DD) in site.timezone
+      ## The time written into the output (build.json, an empty feed's date):
+      ## `SOURCE_DATE_EPOCH` when it is set, otherwise `now`.
+    buildDate*: string  ## the civil date (YYYY-MM-DD) of `sourceDateEpoch` in site.timezone
     warnings*: seq[string]
   BuildOptions* = object
     drafts*, future*: bool
     outDir*, url*, theme*: string
+    now*: string
+      ## The build clock (`--now`): `@<seconds since the Unix epoch>` or an RFC
+      ## 3339 date-time with an offset (a bare number is refused); empty
+      ## selects the wall clock. See `inputs.parseBuildClock`.
     imageCache*: string  ## Optional directory where image variants are reused.
     incremental*: bool
       ## Update the output in place, writing only files whose bytes changed
@@ -100,7 +114,28 @@ type
     render*: LayoutProc
     islands*: seq[Island]
 
+const
+  defaultIndexPermalink* = "/"
+    ## The post index when `[archives] index` is not set: the home page, as
+    ## blog-first generators (Jekyll, Hexo, Pelican) place it.
+  yieldedIndexPermalink* = "/posts/"
+    ## Where that default index moves when a content page is the home page.
+
 proc fail*(message: string) {.noreturn.} = raise newException(BlogError, message)
+
+proc isPlaceholderOrigin*(url: string): bool =
+  ## Whether `url` names a domain reserved for documentation (RFC 2606
+  ## sections 2 and 3, https://www.rfc-editor.org/rfc/rfc2606): the
+  ## `.example` top-level domain, or example.com, example.net or
+  ## example.org and their subdomains. A site there cannot be deployed, so
+  ## its canonical links, feeds and sitemap would point nowhere; `new site`
+  ## writes such a placeholder.
+  if url.len == 0: return false
+  let host = parseUri(url).hostname.toLowerAscii.strip(leading = false, chars = {'.'})
+  if host == "example" or host.endsWith(".example"): return true
+  for domain in ["example.com", "example.net", "example.org"]:
+    if host == domain or host.endsWith("." & domain): return true
+  false
 
 proc stringValue*(node: JsonNode; key: string; default = ""): string =
   if not node.hasKey(key): return default
@@ -298,7 +333,8 @@ proc parseConfig*(node: JsonNode): SiteConfig =
   result.tagPermalink = termPermalink(result.taxonomies, "tags", "/tags/:name/")
   result.categoryPermalink = termPermalink(result.taxonomies, "categories", "/categories/:name/")
   result.archives = node.objectValue("archives")
-  result.indexPermalink = archivePattern(result.archives, "index", "/posts/", [])
+  result.indexYields = not result.archives.hasKey("index")
+  result.indexPermalink = archivePattern(result.archives, "index", defaultIndexPermalink, [])
   result.yearPermalink = archivePattern(result.archives, "year", "/:year/", ["year"])
   result.monthPermalink = archivePattern(result.archives, "month", "", ["year", "month"])
   result.paginate = 10

@@ -6,7 +6,7 @@
 ## dates and slugs (an independent oracle), not computed with the code under
 ## test.
 import std/[unittest, json, sequtils, tables, htmlparser]
-import isonim_blog/[model, html_checks]
+import isonim_blog/[model, html_checks, archives]
 import ./site_helpers
 
 proc hasClass(node: XmlNode; name: string): bool =
@@ -230,3 +230,46 @@ suite "collections, taxonomies, archives and pagination":
     check fileExists(output / "notes/dated/index.html")
     check not dirExists(output / "drafts-box")
     check not readFile(output / "feed.xml").contains("notes/short")
+
+suite "where the post index lives":
+  test "the index is the home page unless pages/index.md claims it; then it is /posts/":
+    let root = fixtureCopy()
+    defer: removeDir(root)
+    fixedEpoch()
+    defer: delEnv("SOURCE_DATE_EPOCH")
+    let config = readFile(root / "site.toml")
+    # Positive control: the fixture sets no index and has a home page.
+    check "index =" notin config
+    check fileExists(root / "pages/index.md")
+    proc indexUrls(site: Site): seq[string] =
+      generatedPages(site).filterIt(it.kind == pkIndex).mapIt(it.url)
+    let withHome = loadSite(root)
+    check withHome.config.indexPermalink == "/posts/"
+    check indexUrls(withHome) == @["/posts/", "/posts/page/2/", "/posts/page/3/"]
+    check withHome.pages.filterIt(it.url == "/").mapIt(it.source) == @["pages/index.md"]
+    let binary = compileSite(root)
+    discard runSite(binary, root, root / "with-home")
+    check readFile(root / "with-home/index.html").contains("Welcome to the notebook.")
+    check listed(root / "with-home", "/posts/", "post-title") == @["another", "third"]
+    # Without the page, the list takes the home page, paginated beneath it.
+    removeFile(root / "pages/index.md")
+    let withoutHome = loadSite(root)
+    check withoutHome.config.indexPermalink == "/"
+    check indexUrls(withoutHome) == @["/", "/page/2/", "/page/3/"]
+    discard runSite(binary, root, root / "without-home")
+    check listed(root / "without-home", "/", "post-title") == @["another", "third"]
+    check listed(root / "without-home", "/page/2/", "post-title") == @["bundle", "second"]
+    check not fileExists(root / "without-home/posts/index.html")
+    # Under a base path the same rule applies to the base path's home page.
+    writeFile(root / "site.toml", "base_path = \"/blog\"\n" & config)
+    check indexUrls(loadSite(root))[0] == "/blog/"
+    writeFile(root / "pages/index.md", "---\ntitle: Home\ndescription: Home\n---\nHome")
+    check indexUrls(loadSite(root))[0] == "/blog/posts/"
+    # An index set explicitly never moves: claiming its URL is a collision.
+    writeFile(root / "site.toml", config & "[archives]\nindex = \"/\"\n")
+    try:
+      discard loadSite(root)
+      check false
+    except BlogError as cause:
+      check cause.msg.contains("pages/index.md")
+      check cause.msg.contains("generated post index page 1")

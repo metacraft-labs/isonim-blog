@@ -216,3 +216,66 @@ suite "build command":
     # The result equals a complete build.
     check build("--out", "full").exitCode == 0
     check treeHash(public, []) == treeHash(root / "full", [])
+
+suite "build clock and origin":
+  test "a dev shell's SOURCE_DATE_EPOCH hides nothing; --now sets the clock; the summary names it":
+    let root = fixtureCopy()
+    let previous = getCurrentDir()
+    setCurrentDir(root)
+    defer:
+      setCurrentDir(previous)
+      removeDir(root)
+    # The value nixpkgs' stdenv exports into every `nix develop` shell.
+    putEnv("SOURCE_DATE_EPOCH", "315532800")
+    defer: delEnv("SOURCE_DATE_EPOCH")
+    let shell = build()
+    check shell.exitCode == 0
+    check shell.error == ""
+    for slug in ["first", "second", "bundle", "third", "another"]:
+      check fileExists(root / "public/posts" / slug / "index.html")
+    check not dirExists(root / "public/posts/future")
+    # SOURCE_DATE_EPOCH still stamps the output.
+    check parseFile(root / "public/build.json")["sourceDateEpoch"].getInt == 315532800
+    check shell.output.contains("Future-dated posts are judged against ")
+    check shell.output.contains("(the wall clock")
+    # An explicit clock: the RFC 3339 form and the epoch form.
+    let early = build("--now", "2020-02-01T12:00:00Z", "--out", "early")
+    check early.exitCode == 0
+    check early.output.contains("Future-dated posts are judged against 2020-02-01T12:00:00Z (--now)")
+    check fileExists(root / "early/posts/first/index.html")
+    check not dirExists(root / "early/posts/second")
+    let late = build("--now", "@4070995200", "--out", "late")  # 2099-01-02T00:00:00Z
+    check late.exitCode == 0
+    check fileExists(root / "late/posts/future/index.html")
+    # An explicit clock repeats byte for byte.
+    check build("--now", "@4070995200", "--out", "late-again").exitCode == 0
+    check treeHash(root / "late", []) == treeHash(root / "late-again", [])
+    let bad = build("--now", "next week")
+    check bad.exitCode == 1
+    check bad.error.contains("--now")
+    # A compact date is not an epoch: it is refused, naming the `@` form.
+    let compact = build("--now", "20261028")
+    check compact.exitCode == 1
+    check compact.error.contains("write '@20261028'")
+    check build("--now", "@253402214400").error.contains("must lie between")
+    check build("--now").exitCode == 1
+
+  test "a reserved example origin is a warning, not an error; a real one is not":
+    let root = fixtureCopy()
+    let previous = getCurrentDir()
+    setCurrentDir(root)
+    defer:
+      setCurrentDir(previous)
+      removeDir(root)
+    putEnv("SOURCE_DATE_EPOCH", "1704067200")
+    defer: delEnv("SOURCE_DATE_EPOCH")
+    # The fixture's site.toml carries the placeholder `new site` writes.
+    check readFile(root / "site.toml").contains("url = \"https://example.org\"\n")
+    let placeholder = build()
+    check placeholder.exitCode == 0
+    check placeholder.output.contains("warning: url https://example.org is a placeholder")
+    check fileExists(root / "public/index.html")
+    let real = build("--url", "https://notes.test", "--out", "real")
+    check real.exitCode == 0
+    check not real.output.contains("is a placeholder")
+    check readFile(root / "real/posts/first/index.html").contains("https://notes.test/posts/first/")

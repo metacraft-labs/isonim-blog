@@ -1,4 +1,4 @@
-# `lib.<system>.buildSite { src, theme ? null, drafts ? false, url ? null }`:
+# `lib.<system>.buildSite { src, theme ? null, drafts ? false, url ? null, now ? null }`:
 # a site as a sandboxed, byte-reproducible derivation.
 #
 # It wraps IsoNim's shared static-site builder (`nix/static-site.nix` of the
@@ -14,11 +14,26 @@
 #    the exporter is a no-op (`--prepare-only`); the content export runs in
 #    its standard postBuild hook, after the optional islands bundle compile.
 #
-# `src` must carry `lastModified` (a flake input, `self`, or
-# `{ outPath; lastModified; rev ? ...; }`). `theme` defaults to the theme
-# site.toml names: a path relative to `src`, or the package name of a theme
-# isonim-blog ships (`isonim-blog-theme-minimal`). A theme package from
-# elsewhere is a flake input passed as `theme`.
+# `src` must carry a positive `lastModified` (a flake input, `self`, or
+# `{ outPath; lastModified; rev ? ...; }`). For a flake, `self.lastModified` is
+# the time of the last commit (of a dirty tree too), so it names the source,
+# not the machine or the moment of the build. It is SOURCE_DATE_EPOCH, and,
+# unless `now` is given, the build clock: a post dated after it (as a civil
+# date in site.toml's timezone) is future and left out. `now` overrides the
+# clock only, as `--now` does: an integer (seconds since the Unix epoch), or
+# a string `--now` accepts: an RFC 3339 date-time with an offset
+# ("2026-11-01T00:00:00Z") or "@<seconds>". A scheduled publish therefore
+# needs a build after the post's date: a new commit, or a scheduled impure
+# build passing `now = builtins.currentTime`.
+#
+# A missing or zero `lastModified` means the source time is unknown. As the
+# clock it would silently build the blog of 1970, with every post left out,
+# so evaluation fails instead, unless `now` is given; `now` must then be an
+# integer, because it dates the output too.
+#
+# `theme` defaults to the theme site.toml names: a path relative to `src`, or
+# the package name of a theme isonim-blog ships (`isonim-blog-theme-minimal`).
+# A theme package from elsewhere is a flake input passed as `theme`.
 {
   pkgs,
   inputs,
@@ -30,14 +45,24 @@
   theme ? null,
   drafts ? false,
   url ? null,
+  now ? null,
 }:
 let
   lib = pkgs.lib;
+  # The source time (SOURCE_DATE_EPOCH, and the default build clock); 0 when
+  # it is unknown. See the header for why an unknown one is refused.
+  sourceTime = if src ? lastModified && builtins.isInt src.lastModified then src.lastModified else 0;
   sourceDateEpoch =
-    if src ? lastModified then
-      src.lastModified
+    if sourceTime > 0 then
+      sourceTime
+    else if now == null then
+      throw "buildSite: src carries no source time (lastModified is ${
+        if src ? lastModified then toString src.lastModified else "absent"
+      }), and a build clock of 1970 would leave every post out as future; pass a src with a positive lastModified (a flake input, self, or { outPath; lastModified; }), or pass now explicitly"
+    else if builtins.isInt now then
+      now
     else
-      throw "buildSite: src must carry lastModified (use a flake input or { outPath; lastModified; })";
+      throw "buildSite: src carries no source time, so now also dates the output and must be an integer (seconds since the Unix epoch), not ${builtins.toJSON now}";
   config = builtins.fromTOML (builtins.readFile "${src}/site.toml");
   # site.toml names its theme by path (relative to the site) or by package
   # name. The themes isonim-blog ships resolve by name here, as they do for
@@ -96,6 +121,17 @@ let
       themeSrc
     ]
     ++ lib.optional drafts "--drafts"
+    ++ [
+      "--now"
+      (
+        if now == null then
+          "@${toString sourceDateEpoch}"
+        else if builtins.isInt now then
+          "@${toString now}"
+        else
+          now
+      )
+    ]
     ++ lib.optionals (url != null) [
       "--url"
       url

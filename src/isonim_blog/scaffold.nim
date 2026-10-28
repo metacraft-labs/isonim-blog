@@ -2,8 +2,8 @@
 ## `publish-draft`. They write the files a site author would otherwise write
 ## by hand and never overwrite an existing file.
 ##
-## Only these commands read the wall clock ("today", in the site's time
-## zone). Builds never do (see `inputs.buildEpoch`).
+## They read the wall clock for "today", in the site's time zone. A build
+## reads it only as the default of `--now` (see `inputs.parseBuildClock`).
 import std/[os, strutils, json, times]
 import ./[model, inputs]
 
@@ -145,8 +145,9 @@ const flakeTemplate = """{
       perSystem =
         { pkgs, system, ... }:
         {
-          # The production site: built in the Nix sandbox, byte-reproducible,
-          # with SOURCE_DATE_EPOCH taken from the commit.
+          # The production site: built in the Nix sandbox, byte-reproducible.
+          # Its clock (which posts are future) and SOURCE_DATE_EPOCH are the
+          # last commit's time, so a scheduled post needs a build after its date.
           packages.default = isonim-blog.lib.${system}.buildSite { src = self; };
           devShells.default = pkgs.mkShell {
             packages = [
@@ -355,16 +356,15 @@ proc newSite*(directory: string; options = NewSiteOptions(); today = ""): seq[st
   var config = "# Site configuration; see isonim-blog's docs/users/building-a-site.md.\n" &
     "title = " & tomlString(title) & "\n" &
     "description = " & tomlString("A new blog built with isonim-blog") & "\n" &
-    "# The canonical origin: feeds, the sitemap and OpenGraph use it.\n" &
+    "# The canonical origin: feeds, the sitemap and OpenGraph use it. Replace the\n" &
+    "# placeholder before deploying (builds warn while it is set; serve needs none).\n" &
     "url = \"https://example.org\"\n" &
     "language = \"en\"\n" &
     "timezone = \"UTC\"\n"
   config.add "# The theme: a package name, or a directory relative to this file.\n" &
     "theme = " & tomlString(if options.theme.len > 0: options.theme else: defaultTheme) & "\n"
-  config.add "\n[archives]\n" &
-    "# The paginated post list is the home page; set index = \"/posts/\" to give\n" &
-    "# the home page to pages/index.md instead.\n" &
-    "index = \"/\"\n"
+  config.add "# The paginated post list is the home page; a pages/index.md moves it\n" &
+    "# to /posts/ ([archives] index = \"/blog/\" puts it elsewhere).\n"
   createDir(root)
   var created: seq[string]
   writeNew(root, "site.toml", config, created)

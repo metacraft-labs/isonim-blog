@@ -20,6 +20,7 @@ import ./[model, inputs]
 type
   ServeOptions* = object
     drafts*, future*: bool
+    now*: string        ## the build clock passed to `build --now`; empty: the wall clock
     port*: int          ## 0 selects the default, 4000
     lan*: bool          ## bind every interface instead of loopback only
     executable*: string
@@ -41,6 +42,20 @@ proc rebuildCommand*(options: ServeOptions): seq[string] =
   result = @[executable, "build", "--incremental"]
   if options.drafts: result.add "--drafts"
   if options.future: result.add "--future"
+  if options.now.len > 0: result.add @["--now", options.now]
+
+proc localOrigin*(options: ServeOptions): string =
+  ## The origin a served site is built for when site.toml names none.
+  "http://localhost:" & $servePort(options)
+
+proc siteRebuildCommand*(root: string; options: ServeOptions): seq[string] =
+  ## `rebuildCommand` for the site at `root`. `build` requires an absolute
+  ## origin, but a fresh checkout should serve without editing site.toml:
+  ## without a url there, the rebuild uses the server's own origin, so
+  ## canonical links and feeds point at the preview (as `jekyll serve`
+  ## does). A url in site.toml is kept.
+  result = rebuildCommand(options)
+  if readSiteConfig(root).url.len == 0: result.add @["--url", localOrigin(options)]
 
 proc watchRoots*(root: string; theme = ""; themeExtra: openArray[string] = []): seq[string] =
   ## Everything a build may read: site.toml, og.svg.nim, the declared
@@ -62,7 +77,7 @@ proc newSiteDevServer*(root: string; options: ServeOptions): StaticDistDevServer
   ## The configured server for the site at `root`, without starting it.
   let theme = resolveTheme(root)
   let tokenFiles = if theme.len > 0: readThemeManifest(theme).tokenFiles else: @[]
-  newStaticDistDevServer(rebuildCommand = rebuildCommand(options),
+  newStaticDistDevServer(rebuildCommand = siteRebuildCommand(root, options),
     distDir = root / "public",
     watchRoots = watchRoots(root, theme, tokenFiles),
     watchExts = @[],  # every file: static/ may hold _headers or favicon.ico

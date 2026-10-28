@@ -105,8 +105,7 @@ suite "responsive images":
       expect BlogError: discard loadSite(root)
 
   test "a missing alt text, an oversized source and a missing image fail the build":
-    # The post must be in the build: the dev shell sets SOURCE_DATE_EPOCH to
-    # 1980, which would leave every post out as future-dated.
+    # A fixed SOURCE_DATE_EPOCH keeps the output timestamps stable.
     putEnv("SOURCE_DATE_EPOCH", "1704067200")
     defer: delEnv("SOURCE_DATE_EPOCH")
     var root = fixtureCopy()

@@ -258,6 +258,10 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     else: newSeq[ParseHooks]()
   if site.config.url.len == 0:
     fail("url is required (in site.toml or with --url): canonical links, feeds and the sitemap need an absolute origin")
+  if isPlaceholderOrigin(site.config.url):
+    site.warnings.add "url " & site.config.url & " is a placeholder (a domain reserved for examples): " &
+      "canonical links, feeds, the sitemap and OpenGraph URLs point there; set url in site.toml " &
+      "(or pass --url) to the origin the site is deployed at"
   var files: seq[SiteFile]
   var origins = initTable[string, string]()
   var assetManifest: seq[tuple[original, hashed: string]]
@@ -544,21 +548,29 @@ proc siteMain*(layouts: openArray[LayoutEntry]; ogTemplate: OgTemplate = default
       of "--drafts": options.drafts = true
       of "--future": options.future = true
       of "--incremental": options.incremental = true
-      of "--root", "--url", "--bundle", "--theme", "--image-cache":
+      of "--root", "--url", "--now", "--bundle", "--theme", "--image-cache":
         let flag = args[i]
         inc i
         if i >= args.len: fail("missing value for " & flag)
         case flag
         of "--root": root = args[i]
         of "--url": options.url = args[i]
+        of "--now": options.now = args[i]
         of "--theme": options.theme = absolutePath(args[i])
         of "--image-cache": options.imageCache = absolutePath(args[i])
         else: bundle = args[i]
       else: fail("unknown exporter argument " & args[i])
       inc i
+    # The wall clock is read once, here, so the summary names the clock the
+    # build used.
+    let explicitClock = options.now.len > 0
+    let now = if explicitClock: parseBuildClock(options.now) else: wallClock()
+    options.now = "@" & $now
     var changed: seq[string]
     let report = exportBlog(root, args[0], layouts, options, bundle, ogTemplate, changed, directives)
     echo "Built " & $report.pages.len & " pages and " & $report.files.len & " files in " & args[0]
+    echo "Future-dated posts are judged against " & formatBuildClock(now) &
+      (if explicitClock: " (--now)" else: " (the wall clock; --now sets another)")
     if options.incremental:
       echo "Updated " & $changed.len & " changed files"
       for path in changed: echo "  " & path

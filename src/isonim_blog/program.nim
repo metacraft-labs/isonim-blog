@@ -200,6 +200,7 @@ proc buildSite*(root: string; options = BuildOptions()): string =
   if options.future: args.add "--future"
   if options.incremental: args.add "--incremental"
   if options.url.len > 0: args.add @["--url", options.url]
+  if options.now.len > 0: args.add @["--now", options.now]
   if bundle.len > 0: args.add @["--bundle", bundle]
   # Image variants are reused across builds of this site.
   args.add @["--image-cache", directory / "images"]

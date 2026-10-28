@@ -18,7 +18,7 @@ Creates `<dir>` (which must not exist, or be empty) with:
 
 | File                           | Contents                                                                                                                                                                                                                                                                                                         |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `site.toml`                    | The title (from the directory name), a placeholder `url` to replace with the site's origin, and `[archives] index = "/"`, which makes the paginated post list the home page                                                                                                                                      |
+| `site.toml`                    | The title (from the directory name) and a placeholder `url` to replace with the site's origin (builds warn until then). With no `[archives] index`, the paginated post list is the home page; a `pages/index.md` moves it to `/posts/`                                                                           |
 | `posts/<today>-hello-world.md` | A sample post                                                                                                                                                                                                                                                                                                    |
 | `flake.nix`                    | `packages.default`, the site built in the Nix sandbox with `buildSite`, and a dev shell with `isonim-blog`, `just` and `git`. Its `isonim-blog` input pins the commit the CLI was built from, so the site builds with the framework that generated it. `nixpkgs` and `flake-parts` follow isonim-blog's own pins |
 | `repro.nim`                    | A Reprobuild project: `repro allow` activates the flake's dev shell, and `repro tasks` lists `serve`, `build` and `check`                                                                                                                                                                                        |
@@ -61,18 +61,25 @@ and an empty `description` to fill in.
 `drafts/<slug>/`, to `posts/<today>-<slug>`. It is a file move, not a
 deployment.
 
-None of these commands overwrites a file. Only they read the clock; builds
-never do.
+None of these commands overwrites a file. They read the clock for "today";
+a build reads it only when no `--now` is given, to decide which posts are
+future.
 
 ## `serve`
 
 ```sh
-isonim-blog serve [--drafts] [--future] [--port 4000] [--lan]
+isonim-blog serve [--drafts] [--future] [--port 4000] [--lan] [--now <time>]
 ```
 
 Builds the site, serves `public/` at `http://127.0.0.1:4000/` and rebuilds on
 every change to `site.toml`, `og.svg.nim`, the content and code directories,
 and the theme. Open pages reload by themselves.
+
+- `site.toml` need not name a `url`: without one, the site is built for the
+  server's own origin, `http://localhost:<port>`, so a fresh checkout serves
+  without editing the configuration. A `url` there is kept.
+- `--now` previews the site as a build at that time would publish it (see
+  `isonim-blog build`); `--future` shows every future-dated post.
 
 - Editing content (posts, pages, data, assets, static files) runs the
   already-compiled site program again; nothing is compiled. Only the output

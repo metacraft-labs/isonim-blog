@@ -161,3 +161,36 @@ suite "serve":
       let response = runCli(args)
       check response.exitCode == 1
       check response.error.len > 0
+
+  test "serve needs no url: it builds for its own origin unless site.toml names one":
+    let site = fixtureCopy()
+    defer: removeDir(site)
+    putEnv("SOURCE_DATE_EPOCH", "1704067200")
+    defer: delEnv("SOURCE_DATE_EPOCH")
+    let options = ServeOptions(executable: "/x/isonim-blog", port: 4123, now: "@1704067200")
+    # With site.toml's url, the build uses it.
+    check siteRebuildCommand(site, options) ==
+      @["/x/isonim-blog", "build", "--incremental", "--now", "@1704067200"]
+    # Without it, `build` refuses, and serve's rebuild names its own origin.
+    writeFile(site / "site.toml", readFile(site / "site.toml").replace("url = \"https://example.org\"\n", ""))
+    check "url =" notin readFile(site / "site.toml").replace("url = \"/about/\"", "")
+    let command = siteRebuildCommand(site, options)
+    check command == @["/x/isonim-blog", "build", "--incremental", "--now", "@1704067200",
+      "--url", "http://localhost:4123"]
+    check siteRebuildCommand(site, ServeOptions(executable: "/x/isonim-blog"))[^1] == "http://localhost:4000"
+    let previous = getCurrentDir()
+    setCurrentDir(site)
+    defer: setCurrentDir(previous)
+    let refused = runCli(["build"])
+    check refused.exitCode == 1
+    check refused.error.contains("url is required")
+    # The serve rebuild itself, run by the real dispatcher.
+    let built = runCli(command[1 .. ^1])
+    check built.exitCode == 0
+    check readFile(site / "public/posts/first/index.html").contains(
+      "<link rel=\"canonical\" href=\"http://localhost:4123/posts/first/\"")
+    check not built.output.contains("is a placeholder")
+    let badNow = runCli(["serve", "--now", "soon"])
+    check badNow.exitCode == 1
+    check badNow.error.contains("--now")
+    check runCli(["serve", "--now", "20261028"]).error.contains("write '@20261028'")

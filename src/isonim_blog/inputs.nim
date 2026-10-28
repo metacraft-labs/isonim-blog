@@ -263,13 +263,84 @@ proc siteInputFiles*(root: string; config: SiteConfig; options: BuildOptions): s
   for dir in dirs: result.add inputFiles(root / dir)
   result.sort()
 
-proc buildEpoch*(root: string; sources: openArray[string]): int64 =
-  ## SOURCE_DATE_EPOCH wins in sandboxes. Local previews use the latest input
-  ## mtime, never the invocation clock, so repeating a build changes no bytes.
-  result = sourceDateEpochFromEnv()
-  if result >= 0: return
-  result = getLastModificationTime(root / "site.toml").toUnix
-  for source in sources: result = max(result, getLastModificationTime(source).toUnix)
+proc formatBuildClock*(now: int64): string =
+  ## `now` as an RFC 3339 UTC date-time, as the build summary prints it.
+  fromUnix(now).utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+
+const
+  minBuildClock* = 0'i64
+    ## 1970-01-01T00:00:00Z: the clock cannot precede the Unix epoch.
+  maxBuildClock* = 253_402_214_399'i64
+    ## 9999-12-30T23:59:59Z. RFC 3339 writes four-digit years, and the civil
+    ## date of the clock (`civilDate`, Python's `datetime`, which stops at
+    ## year 9999) must exist in every timezone, so the last day of 9999 is
+    ## kept as margin for offsets east of UTC.
+
+proc parseBuildClock*(value: string): int64 =
+  ## The build clock as `--now` writes it, in seconds since the Unix epoch:
+  ## `@1704067200` (the form of `date +@%s` and GNU `date -d @…`), or an
+  ## RFC 3339 date-time with a UTC offset
+  ## (https://www.rfc-editor.org/rfc/rfc3339#section-5.6), such as
+  ## `2024-01-01T00:00:00Z` or `2024-01-01T09:00:00.5+09:00` (fractional
+  ## seconds are dropped). A date without a time or an offset is refused:
+  ## it would leave the instant to the build machine. A bare number is
+  ## refused too: `20261028` reads as a date but would be an epoch in 1970,
+  ## which silently hides every post. The result lies in
+  ## `minBuildClock .. maxBuildClock`.
+  proc refuse() {.noreturn.} =
+    fail("--now takes an RFC 3339 date-time with an offset (2024-01-01T00:00:00Z) " &
+      "or seconds since the Unix epoch after '@' (@1704067200), not '" & value & "'")
+  proc outOfRange() {.noreturn.} =
+    fail("--now must lie between " & formatBuildClock(minBuildClock) & " (@" & $minBuildClock &
+      ") and " & formatBuildClock(maxBuildClock) & " (@" & $maxBuildClock & "), not '" & value & "'")
+  if value.len > 0 and value.allCharsInSet(Digits):
+    fail("--now does not take a bare number ('" & value & "'): write '@" & value &
+      "' for seconds since the Unix epoch, or an RFC 3339 date-time with an offset " &
+      "(2024-01-01T00:00:00Z)")
+  if value.startsWith("@"):
+    let digits = value[1 .. ^1]
+    if digits.len == 0 or not digits.allCharsInSet(Digits): refuse()
+    # A value past int64 is still a number, so its refusal names the range
+    # rather than the syntax; past the leading zeros, 12 digits always fit.
+    let significant = digits.strip(trailing = false, chars = {'0'})
+    if significant.len > 12: outOfRange()
+    result = if significant.len == 0: 0 else: parseBiggestInt(significant).int64
+    if result > maxBuildClock: outOfRange()
+    return
+  # RFC 3339 date-time: full-date "T" HH:MM:SS [.frac] ("Z" | +HH:MM | -HH:MM);
+  # "T" and "Z" may be lower case (section 5.6, NOTE).
+  let text = value.toUpperAscii
+  if text.len < 20 or text[10] != 'T': refuse()
+  var rest = text[19 .. ^1]
+  if rest.startsWith("."):
+    var i = 1
+    while i < rest.len and rest[i] in Digits: inc i
+    if i == 1: refuse()
+    rest = rest[i .. ^1]
+  var offset = 0
+  if rest == "Z": discard
+  elif rest.len == 6 and rest[0] in {'+', '-'} and rest[3] == ':' and
+      rest[1 .. 2].allCharsInSet(Digits) and rest[4 .. 5].allCharsInSet(Digits):
+    let hours = parseInt(rest[1 .. 2])
+    let minutes = parseInt(rest[4 .. 5])
+    if hours > 23 or minutes > 59: refuse()
+    offset = (hours * 3600 + minutes * 60) * (if rest[0] == '-': -1 else: 1)
+  else: refuse()
+  let stamp = text[0 .. 18]
+  for i, c in stamp:
+    if (i in [4, 7] and c != '-') or (i in [13, 16] and c != ':') or
+        (i notin [4, 7, 10, 13, 16] and c notin Digits): refuse()
+  try:
+    let local = parse(stamp, "yyyy-MM-dd'T'HH:mm:ss", utc())
+    # times.parse accepts some out-of-range fields; a round trip refuses them.
+    if local.format("yyyy-MM-dd'T'HH:mm:ss") != stamp: refuse()
+    result = local.toTime.toUnix - offset
+  except TimeParseError: refuse()
+  if result < minBuildClock or result > maxBuildClock: outOfRange()
+
+proc wallClock*(): int64 =
+  ## The default build clock: the current time, in whole seconds.
+  epochTime().int64
 
 proc civilDate*(epoch: int64; zone: string): string =
   ## IANA timezone rules come from Python's pinned tzdata closure.
@@ -299,9 +370,16 @@ proc loadSite*(root: string; options = BuildOptions()): Site =
   if options.drafts: sources.add inputFiles(root / "drafts")
   for name in result.config.collections.keys:
     sources.add inputFiles(root / "collections" / name)
-  result.sourceDateEpoch = buildEpoch(root, sources)
-  let today = civilDate(result.sourceDateEpoch, result.config.timezone)
-  result.buildDate = today
+  # "Now" decides which posts are future: the explicit clock, or the wall
+  # clock. SOURCE_DATE_EPOCH only dates what is written into the output
+  # (https://reproducible-builds.org/specs/source-date-epoch/); a Nix dev
+  # shell sets it to 1980-01-01, which must not hide every post.
+  result.now = if options.now.len > 0: parseBuildClock(options.now) else: wallClock()
+  let stamp = sourceDateEpochFromEnv()
+  result.sourceDateEpoch = if stamp >= 0: stamp else: result.now
+  let today = civilDate(result.now, result.config.timezone)
+  result.buildDate = if result.sourceDateEpoch == result.now: today
+    else: civilDate(result.sourceDateEpoch, result.config.timezone)
   var pages: seq[Page]
   for path in sources:
     let rel = relativePath(path, root).replace('\\', '/')
@@ -353,6 +431,15 @@ proc loadSite*(root: string; options = BuildOptions()): Site =
     elif page.collection.len > 0: result.collections.mgetOrPut(page.collection, @[]).add page
     result.pages.add page
   linkNavigation(result)
+  # The default index (the home page) yields to a content page there, such
+  # as pages/index.md, and moves to /posts/. An index set in site.toml stays
+  # put, so a page at its URL is a collision.
+  if result.config.indexYields:
+    let home = cleanRoute(result.config.basePath & defaultIndexPermalink)
+    for page in pages:
+      if page.output and page.url == home:
+        result.config.indexPermalink = yieldedIndexPermalink
+        break
   # Generated listing pages share the URL space: a collision with a content
   # page or between two terms is an error naming both sources.
   checkCollisions(pages & generatedPages(result))

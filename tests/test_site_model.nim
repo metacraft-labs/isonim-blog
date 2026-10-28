@@ -1,6 +1,6 @@
 ## Full fixture discovery and export through real generated Nim layouts.
 ## No mocked compiler, filesystem, parser or publication boundary.
-import std/[unittest, json, sequtils]
+import std/[unittest, json, sequtils, times]
 import isonim_blog/[model, runtime]
 import isonim/static/buildinfo
 import ./site_helpers
@@ -153,3 +153,86 @@ infinity = -inf
     let page = Page(source: "test.md", layout: "a", content: "Body")
     expect BlogError: discard applyLayouts(page, Site(), [LayoutEntry(name: "a", parent: "missing", render: render)])
     expect BlogError: discard applyLayouts(page, Site(), [LayoutEntry(name: "a", parent: "a", render: render)])
+
+suite "the build clock":
+  # "Now" for future-dated posts is an explicit input (`BuildOptions.now`,
+  # `--now`), defaulting to the wall clock. SOURCE_DATE_EPOCH stamps output
+  # only, and file modification times play no part.
+  test "SOURCE_DATE_EPOCH, as a Nix dev shell sets it, hides no post":
+    let root = fixtureCopy()
+    defer: removeDir(root)
+    # nixpkgs' stdenv (and so every mkShell) exports this 1980-01-01 value.
+    putEnv("SOURCE_DATE_EPOCH", "315532800")
+    defer: delEnv("SOURCE_DATE_EPOCH")
+    let site = loadSite(root)
+    check site.posts.mapIt(it.slug) == @["another", "third", "bundle", "second", "first"]
+    # It still stamps the output: build.json and an empty feed's date use it.
+    check site.sourceDateEpoch == 315532800
+    check site.buildDate == "1980-01-01"
+    # The clock used for visibility is the wall clock here.
+    check abs(site.now - epochTime().int64) < 600
+
+  test "now decides which posts are future; file times do not":
+    let root = fixtureCopy()
+    defer: removeDir(root)
+    delEnv("SOURCE_DATE_EPOCH")
+    # Positive control for the fixture: one post is dated 2099-01-01.
+    check fileExists(root / "posts/2099-01-01-future.md")
+    # A content file modified "in 2099" does not move the clock.
+    setLastModificationTime(root / "site.toml", fromUnix(4_102_444_800 + 86_400 * 180))
+    check loadSite(root).posts.allIt(it.slug != "future")
+    # An epoch after `@`, and RFC 3339 date-times with any offset.
+    proc slugs(now: string): seq[string] = loadSite(root, BuildOptions(now: now)).posts.mapIt(it.slug)
+    check slugs("@1577836800") == @["first"]                         # 2020-01-01T00:00:00Z
+    check slugs("@1580515200") == @["first"]                         # 2020-02-01T00:00:00Z
+    check slugs("@0001580515200") == @["first"]                      # leading zeros
+    check slugs("2020-02-02T00:00:00Z") == @["second", "first"]
+    check slugs("2020-02-01T23:30:00-01:00") == @["second", "first"]  # 2020-02-02T00:30Z
+    check slugs("2020-02-02t00:59:59.5+01:00") == @["first"]           # 2020-02-01T23:59:59.5Z
+    check slugs("2099-01-01T00:00:00Z")[0] == "future"
+    let stamped = loadSite(root, BuildOptions(now: "@1577836800"))
+    check stamped.now == 1577836800
+    # Without SOURCE_DATE_EPOCH, output timestamps follow the build clock.
+    check stamped.sourceDateEpoch == 1577836800
+    check stamped.buildDate == "2020-01-01"
+    for bad in [" ", "tomorrow", "2020-02-02", "2020-02-02T00:00:00", "2020-13-02T00:00:00Z",
+        "2020-02-02T25:00:00Z", "@-5", "@", "2020-02-02T00:00:00+0100", "@1e9", "@ 5", "@+5"]:
+      try:
+        discard parseBuildClock(bad)
+        checkpoint "accepted " & bad
+        check false
+      except BlogError as cause:
+        check cause.msg.contains("--now")
+
+  test "a bare number is refused with a pointer to '@'; the clock is bounded":
+    proc refusal(value: string): string =
+      try:
+        discard parseBuildClock(value)
+        checkpoint "accepted " & value
+        check false
+      except BlogError as cause:
+        result = cause.msg
+    # A compact date would otherwise be an epoch in 1970 and hide every post.
+    for bare in ["20261028", "1580515200", "0"]:
+      let message = refusal(bare)
+      check message.contains("does not take a bare number")
+      check message.contains("'@" & bare & "'")
+    # The bounds are accepted exactly, in both forms.
+    check parseBuildClock("@0") == minBuildClock
+    check parseBuildClock("1970-01-01T00:00:00Z") == minBuildClock
+    check parseBuildClock("@" & $maxBuildClock) == maxBuildClock
+    check parseBuildClock("9999-12-30T23:59:59Z") == maxBuildClock
+    check formatBuildClock(maxBuildClock) == "9999-12-30T23:59:59Z"
+    # Past them, the refusal names the range, not the syntax: an epoch the
+    # civil date could not represent, one past int64, and date-times before
+    # 1970 or on the last day of 9999.
+    for outside in ["@" & $(maxBuildClock + 1), "@9223372036854775807", "@99999999999999999999",
+        "9999-12-31T00:00:00Z", "9999-12-30T23:59:59-00:01", "1969-12-31T23:59:59Z",
+        "1970-01-01T00:30:00+01:00"]:
+      let message = refusal(outside)
+      check message.contains("must lie between 1970-01-01T00:00:00Z (@0) and 9999-12-30T23:59:59Z")
+    # The upper bound leaves the civil date representable in every timezone,
+    # so a value parseBuildClock accepts cannot fail later, in the build.
+    check civilDate(maxBuildClock, "Pacific/Kiritimati") == "9999-12-31"  # UTC+14
+    check civilDate(maxBuildClock, "Etc/GMT+12") == "9999-12-30"          # UTC-12
+    check civilDate(minBuildClock, "Etc/GMT+12") == "1969-12-31"

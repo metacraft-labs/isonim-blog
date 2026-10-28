@@ -87,7 +87,10 @@ suite "site model":
     check defaults.perTagFeeds and defaults.fullContentFeeds
     check defaults.tagPermalink == "/tags/:name/"
     check defaults.categoryPermalink == "/categories/:name/"
-    check defaults.indexPermalink == "/posts/"
+    # The default index is the home page; it yields to a content page there
+    # (`loadSite` moves it to /posts/). An explicit index never yields.
+    check defaults.indexPermalink == "/"
+    check defaults.indexYields
     check defaults.yearPermalink == "/:year/"
     check defaults.monthPermalink == ""
     let custom = parseConfig(%*{"title": "N",
@@ -99,6 +102,7 @@ suite "site model":
     check custom.archives["later"].getBool
     check custom.monthPermalink == "/:year/:month/"
     check custom.indexPermalink == "/"
+    check not custom.indexYields
     check custom.tagPermalink == "/t/:slug/" and custom.categoryPermalink == ""
     check custom.extra.len == 0
     for bad in [%*{"feeds": {"rss": "feed.xml"}}, %*{"feeds": {"atom": "/a/"}},
@@ -151,14 +155,16 @@ suite "navigation, listings and feeds":
     check toSeq(site.tags.keys) == @["x", "y"]
     check site.tags["x"].mapIt(it.slug) == @["f", "a", "b", "e"]
     let generated = generatedPages(site)
-    check generated.mapIt(it.url) == @["/journal/posts/", "/journal/posts/page/2/",
-      "/journal/posts/page/3/", "/journal/tags/x/", "/journal/tags/y/",
+    # This site has no home page, so the default index takes it (`loadSite`
+    # moves it to /posts/ when a content page is the home page).
+    check generated.mapIt(it.url) == @["/journal/", "/journal/page/2/",
+      "/journal/page/3/", "/journal/tags/x/", "/journal/tags/y/",
       "/journal/categories/k/", "/journal/2099/", "/journal/2022/", "/journal/2021/",
       "/journal/2020/"]
     check generated.mapIt(it.layout) == @["index", "index", "index", "tag", "tag",
       "category", "archive", "archive", "archive", "archive"]
     check generated[1].listing.mapIt(it.slug) == @["c", "a"]
-    check generated[1].previousPageUrl == "/journal/posts/" and generated[1].nextPageUrl == "/journal/posts/page/3/"
+    check generated[1].previousPageUrl == "/journal/" and generated[1].nextPageUrl == "/journal/page/3/"
     check generated[2].pageNumber == 3 and generated[2].pageCount == 3
     check generated[9].listing.mapIt(it.slug) == @["a", "b"]
     check generated[9].kind == pkYear and generated[9].term == "2020"
@@ -208,3 +214,14 @@ suite "navigation, listings and feeds":
     var noOrigin = site
     noOrigin.config.url = ""
     expect BlogError: discard siteFeeds(noOrigin)
+
+suite "site origin":
+  test "reserved example origins are placeholders; other origins are not":
+    for url in ["https://example.org", "https://example.com", "http://example.net:8080",
+        "https://www.example.org", "https://blog.example", "https://EXAMPLE.ORG"]:
+      checkpoint url
+      check isPlaceholderOrigin(url)
+    for url in ["https://notes.test", "https://example.org.uk", "https://myexample.org",
+        "https://example.io", "http://localhost:4000", "", "https://examples.org"]:
+      checkpoint url
+      check not isPlaceholderOrigin(url)

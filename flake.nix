@@ -308,6 +308,80 @@
               test "$(jq -r '.sourceDateEpoch' ${site}/build.json)" = 1704067200
               mkdir "$out"
             '';
+          # `now` moves the clock that decides which posts are future, and only
+          # that clock: SOURCE_DATE_EPOCH (build.json) still comes from the
+          # source. Without `now`, the source time is the clock
+          # (build-site-source-clock).
+          checks.build-site-clock =
+            let
+              site = self.lib.${system}.buildSite {
+                src = {
+                  outPath = ./examples/basic;
+                  lastModified = 1704067200;
+                };
+                now = "2099-01-02T00:00:00Z";
+              };
+            in
+            pkgs.runCommand "isonim-blog-build-site-clock" { nativeBuildInputs = [ pkgs.jq ]; } ''
+              set -euo pipefail
+              test -s ${site}/posts/future/index.html
+              test -s ${site}/posts/first/index.html
+              test "$(jq -r '.sourceDateEpoch' ${site}/build.json)" = 1704067200
+              mkdir "$out"
+            '';
+          # Without `now`, the build clock is src.lastModified, not the wall
+          # clock: a source time of 2020-05-20 (1590000000) falls between the
+          # example's posts (2020-01-01, -02-02, -03-03 before it; 2021-05-05
+          # twice and 2099-01-01 after it), so the wall clock, or any clock
+          # after 2021-05-05, would publish posts this check requires absent.
+          # A missing or zero source time is refused at evaluation unless
+          # `now` is given, and then only as an integer (it dates the output).
+          checks.build-site-source-clock =
+            let
+              buildSite = self.lib.${system}.buildSite;
+              basic = ./examples/basic;
+              evaluates = args: (builtins.tryEval (buildSite args).drvPath).success;
+              site = buildSite {
+                src = {
+                  outPath = basic;
+                  lastModified = 1590000000;
+                };
+              };
+            in
+            assert
+              !evaluates {
+                src = {
+                  outPath = basic;
+                  lastModified = 0;
+                };
+              };
+            assert !evaluates { src.outPath = basic; };
+            assert
+              !evaluates {
+                src = {
+                  outPath = basic;
+                  lastModified = 0;
+                };
+                now = "2020-05-20T00:00:00Z";
+              };
+            assert evaluates {
+              src = {
+                outPath = basic;
+                lastModified = 0;
+              };
+              now = 1590000000;
+            };
+            pkgs.runCommand "isonim-blog-build-site-source-clock" { nativeBuildInputs = [ pkgs.jq ]; } ''
+              set -euo pipefail
+              for post in first second bundle; do
+                test -s ${site}/posts/$post/index.html
+              done
+              for post in another third future; do
+                test ! -e ${site}/posts/$post
+              done
+              test "$(jq -r '.sourceDateEpoch' ${site}/build.json)" = 1590000000
+              mkdir "$out"
+            '';
           # A declared island becomes exactly one hashed bundle, loaded by the
           # page and named by its CSP, compiled with `nim js` in the sandbox.
           checks.build-site-islands =

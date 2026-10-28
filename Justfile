@@ -46,7 +46,16 @@ nix-build:
         ".#checks.$system.example-basic" \
         ".#checks.$system.theme-minimal" \
         ".#checks.$system.build-site-contract" \
+        ".#checks.$system.build-site-clock" \
+        ".#checks.$system.build-site-source-clock" \
         ".#checks.$system.build-site-islands" 2>&1 | tee test-logs/nix-build.log
+    @# build-site-source-clock proves an unknown source time is refused; this
+    @# proves the refusal says why (the message is not visible to tryEval).
+    system="$(nix eval --raw --impure --expr builtins.currentSystem)"; \
+    if message="$(nix eval --impure --raw --expr "(((builtins.getFlake (toString ./.)).lib.$system.buildSite { src = { outPath = ./examples/basic; lastModified = 0; }; }).drvPath)" 2>&1)"; then \
+        echo "buildSite accepted lastModified = 0" >&2; exit 1; \
+    fi; \
+    grep -qF 'src carries no source time (lastModified is 0)' <<<"$message" || { echo "$message" >&2; exit 1; }
 
 # The theme conformance kit: check a theme directory (the shipped
 # themes/minimal, a theme package, or a private site-local theme) against
