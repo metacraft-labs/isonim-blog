@@ -9,6 +9,12 @@
 //   (WCAG 2.2 SC 1.4.10 Reflow, https://www.w3.org/TR/WCAG22/#reflow,
 //   asks for no two-dimensional scrolling at 320px; 360px is the narrowest
 //   common phone the kit targets);
+// - at 360 pixels, the boxes that scroll sideways inside the page (code
+//   blocks, table wrappers: any element whose overflow-x is auto or scroll
+//   and whose content is wider than it) are counted by tag and class and
+//   reported, so a theme's choice to scroll or wrap wide content is
+//   visible; axe's scrollable-region-focusable rule (WCAG 2.2 SC 2.1.1)
+//   then requires each of them to be reachable from the keyboard;
 // - at 360 and at 1280 pixels, the pinned axe-core
 //   (https://github.com/dequelabs/axe-core) reports no violation of its
 //   WCAG 2.0, 2.1 and 2.2 level A and AA rules. Colour contrast is among
@@ -136,13 +142,41 @@ async function overflow(page) {
   });
 }
 
+// The elements that scroll horizontally inside the page: computed
+// overflow-x auto or scroll, content wider than the box. Named by tag and
+// class, as in `overflow`.
+async function scrollers(page) {
+  return await page.evaluate(() => {
+    const names = [];
+    for (const el of document.body.querySelectorAll("*")) {
+      const style = getComputedStyle(el);
+      if (
+        (style.overflowX === "auto" || style.overflowX === "scroll") &&
+        el.scrollWidth > el.clientWidth + 1
+      )
+        names.push(
+          el.tagName.toLowerCase() +
+            (el.className && typeof el.className === "string"
+              ? "." + el.className.trim().split(/\s+/).join(".")
+              : ""),
+        );
+    }
+    return names;
+  });
+}
+
 async function main() {
   const input = readInput();
   const root = normalize(input.root);
   const driverDir = process.env.PLAYWRIGHT_CORE_PATH ?? "";
   const axeDir = process.env.ISONIM_BLOG_AXE ?? "";
   const problems = [];
-  const report = { problems, pages: input.pages.length, runs: 0 };
+  const report = {
+    problems,
+    pages: input.pages.length,
+    runs: 0,
+    scrollers: {},
+  };
   if (!existsSync(join(driverDir, "index.mjs")))
     throw new Error(`no playwright-core at ${driverDir}`);
   if (!existsSync(join(axeDir, "axe.min.js")))
@@ -187,6 +221,9 @@ async function main() {
               problems.push(
                 `${path} (${scheme}, ${width}px): scrolls horizontally by ${o.excess}px: ${o.offenders.join(", ")}`,
               );
+            if (scheme === SCHEMES[0])
+              for (const name of await scrollers(page))
+                report.scrollers[name] = (report.scrollers[name] ?? 0) + 1;
           }
           const axe = await axeRun(page, axeSource);
           report.axe = axe.version;

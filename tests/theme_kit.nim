@@ -22,7 +22,10 @@
 ##    (links and anchors written by the layouts, alt text, feeds);
 ## 9. in Chromium, with axe-core: no WCAG 2.0/2.1/2.2 A or AA violation on
 ##    any page, in the light and the dark scheme, at 360 and 1280 pixels
-##    wide; and no horizontal scroll at 360 pixels.
+##    wide; and no horizontal scroll at 360 pixels. The summary names the
+##    boxes that scroll sideways inside the pages at 360 pixels (code
+##    blocks, table wrappers), so whether a theme scrolls or wraps wide
+##    content is visible; axe requires every such box to be focusable.
 ##
 ## The browser checks run `theme_kit_browser.mjs` with the dev shell's pinned
 ## Playwright Chromium and axe-core. Nothing is mocked: the fixture is built
@@ -109,6 +112,18 @@ proc stylesheetHrefs(html: string): seq[string] =
     if tag.name == "link" and "stylesheet" in tag.attr("rel").toLowerAscii.splitWhitespace():
       result.add tag.attr("href")
 
+proc scrollerSummary*(scrollers: JsonNode): string =
+  ## The boxes that scroll sideways inside the pages at 360 pixels, by tag
+  ## and class, in byte order: `boxes scrolling sideways at 360px:
+  ## div.table-scroll 2, pre 4`, or `... none`. A theme that wraps wide
+  ## content has none; one that scrolls it must make each box focusable,
+  ## which axe checks.
+  var entries: seq[string]
+  if not scrollers.isNil and scrollers.kind == JObject:
+    for name, count in scrollers: entries.add name & " " & $count.getInt
+  entries.sort()
+  "boxes scrolling sideways at 360px: " & (if entries.len == 0: "none" else: entries.join(", "))
+
 proc browserChecks*(output: string; pages: seq[string]): tuple[problems: seq[string], summary: string] =
   ## Run the browser driver: every problem it reports (or why it could not
   ## run), and what it checked.
@@ -135,7 +150,8 @@ proc browserChecks*(output: string; pages: seq[string]): tuple[problems: seq[str
       result.problems.add "the browser driver exited " & $code & " without naming a problem"
     if report.hasKey("runs"):
       result.summary = $report["runs"].getInt & " axe runs over " & $pages.len & " pages (axe-core " &
-        report{"axe"}.getStr("?") & ", Chromium " & report{"browser"}.getStr("?") & ")"
+        report{"axe"}.getStr("?") & ", Chromium " & report{"browser"}.getStr("?") & "); " &
+        scrollerSummary(report{"scrollers"})
   finally: process.close()
 
 proc runThemeKit*(theme: string; work: string; browser = true): KitReport =

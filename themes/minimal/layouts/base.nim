@@ -8,10 +8,11 @@ import ../includes/minimal
 proc layout*(page: Page; site: Site; content: string): string =
   let header = siteHeader(site, page)
   let footer = siteFooter(site)
+  let mainClasses = mainClass(site)
   ui:
     a(class = "skip-link", href = "#content"): text "Skip to content"
     raw header
-    main(id = "content", class = "site-main"):
+    main(id = "content", class = mainClasses):
       # A child layout's output is already generated IsoNim markup.
       raw content
     raw footer

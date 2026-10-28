@@ -67,7 +67,9 @@ test-theme theme:
         build/bin/theme-kit "$theme" 2>&1 | tee test-logs/test-theme.log
 
 # The kit's browser checks must fail for broken themes: low contrast in
-# either scheme, sideways scrolling at 360px, a script, a missing layout.
+# either scheme, sideways scrolling at 360px, a scroll box the keyboard
+# cannot reach, a script, a missing layout. Also checks that the minimal
+# theme scrolls long code and wide tables by default and wraps code on request.
 test-theme-controls:
     @mkdir -p test-logs build/bin
     nim c --hints:off -d:release --out:build/bin/theme-kit --nimcache:build/nimcache/theme-kit tests/theme_kit.nim

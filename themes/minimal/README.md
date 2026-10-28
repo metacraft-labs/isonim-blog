@@ -28,6 +28,9 @@ drops the site chrome and spells out external links.
   `items = [{ title = "About", url = "/about/" }]`. URLs starting with `/`
   are site paths, placed under `base_path`.
 - `author = { name, url }` adds a byline to the footer.
+- `wrap_code = true` wraps long code lines instead of scrolling them inside
+  their block (default `false`). Wide tables scroll either way. See
+  "Long code lines and wide tables" in the isonim-blog theme documentation.
 
 ## Changing it
 

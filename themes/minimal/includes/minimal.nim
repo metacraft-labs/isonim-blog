@@ -110,3 +110,20 @@ proc postSummary*(post: Page): string =
       tdiv(class = "prose"):
         # The excerpt is generated Markdown output, not authored structure.
         raw post.excerpt
+
+proc wrapsCode*(site: Site): bool =
+  ## `wrap_code = true` in site.toml: code lines wrap instead of scrolling
+  ## inside their block. The theme's `[config]` defaults it to false; any
+  ## value other than a boolean fails the build.
+  if site.config.extra.isNil: false
+  else: site.config.extra.boolValue("wrap_code")
+
+proc mainClass*(site: Site): string =
+  ## The main element's classes: `wrap-code` selects the opt-in wrapping.
+  # `result` is set before the call that can raise. Written as one
+  # `if`-expression, Nim 2.2.4 (ARC/ORC, debug and release builds) returns
+  # an uninitialized string when `wrapsCode` raises; the caller then frees
+  # it, and the site program crashed (SIGSEGV) instead of reporting the
+  # invalid value.
+  result = "site-main"
+  if wrapsCode(site): result.add " wrap-code"

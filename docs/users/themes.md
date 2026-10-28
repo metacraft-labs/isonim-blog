@@ -18,6 +18,42 @@ isonim-blog ships one theme, `isonim-blog-theme-minimal` (`themes/minimal/`),
 which `new site` selects. It is plain, accessible (WCAG 2.2 AA in the light
 and the dark scheme) and uses no JavaScript.
 
+## Long code lines and wide tables
+
+The Markdown renderer emits every fenced code block as `<pre tabindex="0">`
+and wraps every table in a scroll region:
+
+```html
+<div class="table-scroll" role="region" tabindex="0" aria-label="Table">
+  <table>
+    ...
+  </table>
+</div>
+```
+
+A theme can therefore let a code line or a table that is wider than the
+column scroll inside its own box (`overflow-x: auto` on `pre` and
+`.table-scroll`) without widening the page. Each of those boxes can be
+focused, so a reader without a pointer can reach it and scroll it with the
+arrow keys: WCAG 2.2 success criterion 2.1.1
+(<https://www.w3.org/TR/WCAG22/#keyboard>) asks for that, and axe-core's
+`scrollable-region-focusable` rule checks it. A scrolling box without
+`tabindex` (a `table` given `overflow-x: auto` itself, say) fails the check.
+
+The minimal theme scrolls both by default, as Hugo, Astro and most other
+static site generators do: a wrapped code line cannot be told from two
+lines, which matters in Python, YAML and shell, and in copied code. A site
+that prefers wrapped code lines sets this in `site.toml`:
+
+```toml
+wrap_code = true    # default false: long code lines scroll
+```
+
+The theme then adds the class `wrap-code` to the `<main>` element, and its
+stylesheet wraps the lines of every code block inside it. Wide tables keep
+scrolling. Any other value than `true` or `false` fails the build. When
+printed, code lines and table cells always wrap.
+
 ## Naming a theme in `site.toml`
 
 ```toml
@@ -200,7 +236,10 @@ content feature, with no layouts of its own) with the theme and checks that:
   invalid feed;
 - in Chromium, axe-core finds no WCAG 2.0, 2.1 or 2.2 level A or AA
   violation on any page, in the light and the dark scheme, at 360 and 1280
-  pixels wide, and no page scrolls sideways at 360 pixels.
+  pixels wide, and no page scrolls sideways at 360 pixels. Its summary
+  counts the boxes that scroll sideways inside the pages at 360 pixels
+  (`pre 2, div.table-scroll 2` for the minimal theme), so you can see
+  whether the theme scrolls or wraps wide content.
 
 It exits with status 1 and names each problem when a check fails, and keeps
 the build for inspection.

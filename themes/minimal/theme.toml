@@ -11,3 +11,5 @@ directives = []
 
 [config]
 paginate = 10
+# Long code lines scroll inside their block; true wraps them instead.
+wrap_code = false

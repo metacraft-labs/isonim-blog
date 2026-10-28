@@ -6,7 +6,15 @@
 ##
 ## Defects: low text contrast in the light scheme only, then in the dark
 ## scheme only (both schemes are checked, and separately); a header wider
-## than a 360px screen; a layout that emits a script; a missing post layout.
+## than a 360px screen; a layout that emits a script; a missing post layout;
+## a table that scrolls without the renderer's focusable wrapper.
+##
+## The shipped theme's handling of wide content is checked here too, in the
+## browser: by default the fixture's long code lines and wide tables scroll
+## inside their own (focusable) boxes, and with `wrap_code = true` code
+## wraps while tables still scroll. axe passing on a theme that merely
+## wrapped everything would prove nothing about scroll boxes, so the counts
+## the kit reports are asserted, not only its verdict.
 ## No test doubles: real Chromium, real axe-core, real builds.
 import std/[os, osproc, strutils, tempfiles]
 
@@ -15,8 +23,19 @@ let kit = repoRoot / "build/bin/theme-kit"
 
 var failures = 0
 
+proc scrollCount(output, name: string): int =
+  ## How many `name` boxes the kit's summary reports scrolling sideways at
+  ## 360px (0 when it names none); -1 when the summary is missing.
+  const marker = "boxes scrolling sideways at 360px: "
+  let at = output.find(marker)
+  if at < 0: return -1
+  for entry in output[at + marker.len .. ^1].splitLines()[0].split(", "):
+    let space = entry.rfind(' ')
+    if space > 0 and entry[0 ..< space] == name: return parseInt(entry[space + 1 .. ^1])
+
 proc control(name: string; mutate: proc(theme: string); expectPass: bool;
-    present: openArray[string] = []; absent: openArray[string] = []) =
+    present: openArray[string] = []; absent: openArray[string] = [];
+    inspect: proc(output: string): seq[string] = nil) =
   let work = createTempDir("isonim-blog-kit-control-", "")
   let theme = work / "theme"
   copyDir(repoRoot / "themes/minimal", theme)
@@ -29,6 +48,7 @@ proc control(name: string; mutate: proc(theme: string); expectPass: bool;
     if text notin output: problems.add "missing from the report: " & text
   for text in absent:
     if text in output: problems.add "unexpected in the report: " & text
+  if inspect != nil: problems.add inspect(output)
   if problems.len == 0:
     echo "  [OK] ", name
     removeDir(work)
@@ -65,6 +85,25 @@ control("a layout that emits a script fails the build", proc(theme: string) =
   replaceIn(theme / "layouts/base.nim", "    raw footer\n",
     "    raw footer\n    raw \"<script src=\\\"/tracker.js\\\"></script>\"\n"),
   expectPass = false, present = ["FAIL the fixture builds with the theme", "undeclared script"])
+control("by default, long code lines and wide tables scroll in focusable boxes", proc(theme: string) = discard,
+  expectPass = true, present = ["PASS WCAG 2.2 AA"], absent = ["scrollable-region-focusable"],
+  inspect = proc(output: string): seq[string] =
+    # The fixture has two code blocks and one table wider than 360px
+    # (posts/code-heavy, posts/every-prose-feature).
+    if scrollCount(output, "pre") < 2: result.add "code blocks scrolling: " & $scrollCount(output, "pre")
+    if scrollCount(output, "div.table-scroll") < 1:
+      result.add "tables scrolling: " & $scrollCount(output, "div.table-scroll"))
+control("wrap_code = true wraps code lines; wide tables still scroll", proc(theme: string) =
+  replaceIn(theme / "theme.toml", "wrap_code = false", "wrap_code = true"),
+  expectPass = true, present = ["PASS WCAG 2.2 AA"],
+  inspect = proc(output: string): seq[string] =
+    if scrollCount(output, "pre") != 0: result.add "code blocks scrolling: " & $scrollCount(output, "pre")
+    if scrollCount(output, "div.table-scroll") < 1:
+      result.add "tables scrolling: " & $scrollCount(output, "div.table-scroll"))
+control("a table that scrolls itself, outside the focusable wrapper, fails axe", proc(theme: string) =
+  let css = theme / "assets/minimal.css"
+  writeFile(css, readFile(css) & "\n.prose table { display: block; overflow-x: auto; }\n"),
+  expectPass = false, present = ["(light, 360px): axe scrollable-region-focusable", "> table): Scrollable region must have keyboard access"])
 control("a theme without a post layout fails naming it", proc(theme: string) =
   removeFile(theme / "layouts/post.nim"),
   expectPass = false, present = ["FAIL required layouts", "missing layouts/post.nim"])

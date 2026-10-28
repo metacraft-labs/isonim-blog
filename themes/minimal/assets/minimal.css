@@ -6,10 +6,16 @@
  * class set by script.
  *
  * Layout: one readable column (sys-size-measure) with a gutter, so no line
- * is wider than the viewport at 360px. Code lines and table cells wrap
- * rather than scroll: a scrolling box is reachable only with a pointer
- * unless the markup makes it focusable (axe: scrollable-region-focusable,
- * WCAG 2.2 SC 2.1.1), and the renderer's <pre> and <table> are not.
+ * is wider than the viewport at 360px. Code blocks and tables that are
+ * wider than the column scroll inside their own box instead, as most static
+ * site generators' themes do: a wrapped code line cannot be told from two
+ * lines, and breaking an identifier mid-token misleads. The renderer makes
+ * each of those boxes keyboard-focusable (`<pre tabindex="0">`, and a
+ * focusable, named `.table-scroll` region around every table), so they stay
+ * reachable without a pointer (WCAG 2.2 SC 2.1.1; axe-core's
+ * scrollable-region-focusable). A site that prefers wrapped code sets
+ * `wrap_code = true` in site.toml; the base layout then adds `wrap-code`
+ * to the main element.
  */
 
 *,
@@ -292,6 +298,7 @@ h6 {
 .prose blockquote,
 .prose pre,
 .prose table,
+.prose .table-scroll,
 .prose figure,
 .prose aside {
   margin: 0 0 1.125rem;
@@ -356,10 +363,12 @@ pre {
   overflow-wrap: anywhere;
 }
 
+/* A code block keeps its lines: a longer line scrolls inside the block. */
 pre {
   padding: 0.875rem 1rem;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
   background: var(--sys-color-surface-raised);
   border: 1px solid var(--sys-color-border);
   border-radius: var(--sys-size-radius);
@@ -370,7 +379,23 @@ pre:focus-visible {
   outline-offset: 0;
 }
 
-/* Tables fit the column; long cell content wraps. */
+/* Opt-in (`wrap_code = true` in site.toml): code lines wrap instead. */
+.wrap-code pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Tables fill the column; a table wider than that scrolls inside the
+ * renderer's .table-scroll region. Cell text wraps between words only. */
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.table-scroll > table {
+  margin-bottom: 0;
+}
+
 .prose table {
   width: 100%;
   border-collapse: collapse;
@@ -382,7 +407,7 @@ td {
   border: 1px solid var(--sys-color-border);
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
 }
 
 th {
@@ -488,5 +513,20 @@ math[display="block"] {
   figure,
   table {
     break-inside: avoid;
+  }
+
+  /* Paper cannot scroll: long code lines and wide tables wrap. */
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .table-scroll {
+    overflow: visible;
+  }
+
+  th,
+  td {
+    overflow-wrap: anywhere;
   }
 }

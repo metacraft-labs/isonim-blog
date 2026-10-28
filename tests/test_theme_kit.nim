@@ -154,3 +154,63 @@ The rest of the essay is the details layer.
     try: discard buildSite(root)
     except BlogError as cause: message = cause.msg
     check "theme fixture-capabilities requires site.toml key author.name" in message
+
+suite "the minimal theme: long code lines and wide tables":
+  # The renderer makes every code block and table wrapper a focusable scroll
+  # box; the theme scrolls them by default and wraps code with `wrap_code`.
+  # The browser half (that they really scroll or wrap, and axe's
+  # scrollable-region-focusable rule) is in `just test-theme-controls`.
+  proc buildFixture(root, siteKeys: string): string =
+    ## The conformance fixture, copied into the empty directory `root` and
+    ## built with the shipped theme, `siteKeys` added as top-level site.toml
+    ## keys; returns the output directory.
+    copyDir(conformanceFixture, root / "site")
+    writeFile(root / "site/site.toml", "theme = " & $(%(repoRoot / "themes/minimal")) & "\n" &
+      siteKeys & readFile(root / "site/site.toml"))
+    result = root / "public"
+    discard buildSite(root / "site", BuildOptions(drafts: true, outDir: result, now: "@" & kitEpoch))
+
+  test "code blocks and tables are focusable scroll boxes, and code scrolls by default":
+    let root = createTempDir("isonim-blog-wide-content-", "")
+    defer: removeDir(root)
+    let public = buildFixture(root, "")
+    var blocks, tables: int
+    for page in ["posts/code-heavy/index.html", "posts/every-prose-feature/index.html"]:
+      check htmlElements(public / page, "main")[0]["class"] == "site-main"
+      let elements = htmlElements(public / page, "pre", "table", "div")
+      for n, element in elements:
+        if element["<tag>"] == "pre":
+          inc blocks
+          check element.getOrDefault("tabindex") == "0"
+        elif element["<tag>"] == "table":
+          inc tables
+          let wrapper = elements[n - 1]
+          check wrapper["<tag>"] == "div"
+          check wrapper.getOrDefault("class") == "table-scroll"
+          check wrapper.getOrDefault("role") == "region"
+          check wrapper.getOrDefault("tabindex") == "0"
+          check wrapper.getOrDefault("aria-label") == "Table"
+    # Vacuity guard: the fixture's long code lines and wide table are there.
+    check blocks == 3
+    check tables == 2
+    let css = stylesheetText(public, "posts/code-heavy/index.html")
+    check "white-space: pre;\n  overflow-wrap: normal;\n  overflow-x: auto;" in css
+    check ".table-scroll {\n  max-width: 100%;\n  overflow-x: auto;\n}" in css
+    check ".wrap-code pre {\n  white-space: pre-wrap;" in css
+
+  test "wrap_code = true marks the main element so code lines wrap":
+    let root = createTempDir("isonim-blog-wide-content-", "")
+    defer: removeDir(root)
+    let public = buildFixture(root, "wrap_code = true\n")
+    for page in ["posts/code-heavy/index.html", "index.html", "tags/writing/index.html"]:
+      check htmlElements(public / page, "main")[0]["class"] == "site-main wrap-code"
+    # Code blocks and tables keep their focusable markup either way.
+    check htmlElements(public / "posts/code-heavy/index.html", "pre")[0]["tabindex"] == "0"
+
+  test "wrap_code must be a boolean":
+    let root = createTempDir("isonim-blog-wide-content-", "")
+    defer: removeDir(root)
+    var message = ""
+    try: discard buildFixture(root, "wrap_code = \"yes\"\n")
+    except BlogError as cause: message = cause.msg
+    check "wrap_code must be a boolean" in message
