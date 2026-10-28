@@ -71,7 +71,9 @@ future.
 isonim-blog serve [--drafts] [--future] [--port 4000] [--lan] [--now <time>]
 ```
 
-Builds the site, serves `public/` at `http://127.0.0.1:4000/` and rebuilds on
+Builds the site, serves `public/` at `http://127.0.0.1:4000/` (at
+`http://127.0.0.1:4000/blog/` for a site with `base_path = "/blog"`, as the
+deployed site serves it; other paths answer 404) and rebuilds on
 every change to `site.toml`, `og.svg.nim`, the content and code directories,
 and the theme. Open pages reload by themselves.
 

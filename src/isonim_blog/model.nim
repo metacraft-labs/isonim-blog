@@ -189,6 +189,19 @@ proc redirectSource*(basePath, value: string): string =
       fail("unsafe redirect_from segment: " & value)
   basePath & value
 
+proc outputRoute*(basePath, url: string): string =
+  ## The route of a site URL path relative to the output root. The output
+  ## directory is the base path's root, as with Hugo's `baseURL`, Jekyll's
+  ## `baseurl` and Eleventy's `pathPrefix`: `base_path` appears in the URLs a
+  ## build writes, never in where it writes them (`/blog/posts/x/` is
+  ## written as `posts/x/index.html`). A URL outside the base path is a
+  ## `BlogError`.
+  if basePath.len == 0: return url
+  if url == basePath or url == basePath & "/": return "/"
+  if not url.startsWith(basePath & "/"):
+    fail(url & " is not under base_path " & basePath)
+  url[basePath.len .. ^1]
+
 proc outputPath*(route: string): string =
   let value = cleanRoute(route)
   if value == "/": "index.html"

@@ -25,6 +25,13 @@ match a path, Pages sends a header set by both once, with both values joined,
 so set each header in one rule only, and do not add a Content-Security-Policy
 yourself.
 
+Pages serves a project at the root of its own hostname, and the rules in
+both files name paths from the root of `public/`. A site with a `base_path`
+keeps that layout (see
+[Serving under a sub-path](building-a-site.md#serving-under-a-sub-path)), so
+serving it below another host needs a proxy that forwards the base path to
+the project with the prefix removed.
+
 The `Justfile` names the Pages project (`project`, from the directory name)
 and its production branch (`production_branch`, `main`). Change them to match
 the project, and create the project with that production branch

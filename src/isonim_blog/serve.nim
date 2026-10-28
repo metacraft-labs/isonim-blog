@@ -77,11 +77,16 @@ proc newSiteDevServer*(root: string; options: ServeOptions): StaticDistDevServer
   ## The configured server for the site at `root`, without starting it.
   let theme = resolveTheme(root)
   let tokenFiles = if theme.len > 0: readThemeManifest(theme).tokenFiles else: @[]
+  let config = readSiteConfig(root)
+  # `public/` is the base path's root (its URLs carry base_path, its files
+  # do not), so the server mounts it at the base path, as the deployed host
+  # does.
   newStaticDistDevServer(rebuildCommand = siteRebuildCommand(root, options),
     distDir = root / "public",
     watchRoots = watchRoots(root, theme, tokenFiles),
     watchExts = @[],  # every file: static/ may hold _headers or favicon.ico
-    siteName = readSiteConfig(root).title)
+    siteName = config.title,
+    basePath = config.basePath)
 
 proc serveSite*(root: string; options = ServeOptions()) =
   ## Run the dev server until the process is stopped. The rebuild command
@@ -91,7 +96,7 @@ proc serveSite*(root: string; options = ServeOptions()) =
   setCurrentDir(root)
   stdout.writeLine "Serving " & server.siteName & " at http://" &
     (if options.lan: "0.0.0.0" else: "127.0.0.1") & ":" & $servePort(options) &
-    "/ (live reload on" & (if options.drafts: ", drafts" else: "") &
+    server.basePath & "/ (live reload on" & (if options.drafts: ", drafts" else: "") &
     (if options.future: ", future posts" else: "") & "; Ctrl-C stops)"
   stdout.flushFile()
   waitFor server.serve(servePort(options), serveHost(options))

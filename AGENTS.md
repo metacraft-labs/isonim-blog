@@ -22,7 +22,7 @@ just test-theme themes/minimal  # theme conformance kit, axe-core in Chromium
 just test-theme-controls        # the kit must fail for broken themes
 ```
 
-Run the complete suite during development and before every push: sixteen
+Run the complete suite during development and before every push: seventeen
 suites on C, and the three backend-independent suites on JavaScript too.
 After changing a theme, the theme format or the content renderer, also run
 `just test-theme themes/minimal` and `just test-theme-controls`: they drive

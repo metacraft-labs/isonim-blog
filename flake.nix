@@ -131,7 +131,7 @@
               checkPhase = ''
                 runHook preCheck
                 export HOME="$TMPDIR"
-                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds test_static_images test_static_ogimage test_check test_serve_reload test_theme_format test_theme_override test_theme_kit; do
+                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds test_base_path test_static_images test_static_ogimage test_check test_serve_reload test_theme_format test_theme_override test_theme_kit; do
                   nim c -r --out:build/tests/$suite --nimcache:build/nimcache/$suite tests/$suite.nim
                 done
                 for suite in test_plumbing test_model_pure test_theme_format; do

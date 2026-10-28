@@ -4,7 +4,7 @@
 ## browser does: HTTP requests for pages and an RFC 6455 WebSocket for live
 ## reload (the client below performs the real handshake and reads real
 ## frames). No test doubles.
-import std/[unittest, net, base64, httpclient, times, monotimes, random]
+import std/[unittest, net, base64, httpclient, times, monotimes, random, streams]
 import isonim_blog
 import isonim/static/buildinfo
 import isonim/server/static_dist_dev_server
@@ -143,6 +143,70 @@ suite "serve":
     check recovered.body.contains("Layout edited")
     check sha256Hex(readFile(program)) == goodProgram
     live.socket.close()
+
+  test "under a base path, serve mounts public/ at the base path and every asset loads":
+    let work = createTempDir("isonim-blog-serve-base-", "")
+    let site = work / "site"
+    copyDir(repoRoot / "examples/basic", site)
+    # No url: serve builds for its own origin, with the base path in every URL.
+    writeFile(site / "site.toml", "base_path = \"/blog\"\ntheme = \"isonim-blog-theme-minimal\"\n" &
+      readFile(site / "site.toml").replace("url = \"https://example.org\"\n", ""))
+    let cli = compileCli(work)
+    let port = freePort()
+    let server = startProcess(cli, workingDir = site,
+      args = ["serve", "--port", $port, "--now", "@1704067200"], options = {poStdErrToStdOut})
+    var stopped = false
+    proc stop(): string =
+      if not stopped:
+        stopped = true
+        server.terminate()
+        discard server.waitForExit()
+        result = server.outputStream.readAll()
+        server.close()
+    defer:
+      discard stop()
+      removeDir(work)
+    check waitFor(proc(): bool =
+      try: get(port, "/blog/posts/first/").status == 200 except CatchableError: false, 300)
+    # The files sit at public/'s root and are served only under the base path.
+    check fileExists(site / "public/posts/first/index.html")
+    check not dirExists(site / "public/blog")
+    check get(port, "/blog/").status == 200
+    check get(port, "/blog").status == 200
+    check get(port, "/posts/first/").status == 404
+    check get(port, "/blogger/posts/first/").status == 404
+    # Every root-relative reference of the served pages loads from the server:
+    # stylesheets, images and their variants, feeds, other pages.
+    var requested = 0
+    for path in ["/blog/", "/blog/posts/bundle/", "/blog/about/", "/blog/tags/nim/"]:
+      let page = get(port, path)
+      check page.status == 200
+      check page.body.contains("/__isonim_livereload")
+      var references: seq[string]
+      for marker in ["href=\"", "src=\"", "srcset=\""]:
+        var at = page.body.find(marker)
+        while at >= 0:
+          let start = at + marker.len
+          let value = page.body[start ..< page.body.find('"', start)]
+          for candidate in value.split(','):
+            let url = candidate.strip().splitWhitespace()
+            if url.len > 0: references.add url[0]
+          at = page.body.find(marker, start)
+      for reference in references:
+        var url = reference
+        if url.startsWith("http://localhost:" & $port):
+          url = url["http://localhost:".len + ($port).len .. ^1]
+        if not url.startsWith("/") or url.startsWith("//") or url.startsWith("/__isonim"): continue
+        check url.startsWith("/blog/")
+        let fetched = get(port, url.split('#')[0])
+        if fetched.status != 200: echo "not served: ", path, " -> ", url
+        check fetched.status == 200
+        inc requested
+    check requested >= 30
+    # The canonical link names the served origin and the base path.
+    check get(port, "/blog/posts/first/").body.contains(
+      "<link rel=\"canonical\" href=\"http://localhost:" & $port & "/blog/posts/first/\"")
+    check stop().contains("at http://127.0.0.1:" & $port & "/blog/ (live reload on")
 
   test "serve binds loopback unless --lan, and rejects bad arguments":
     check serveHost(ServeOptions()) == "127.0.0.1"

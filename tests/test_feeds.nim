@@ -221,9 +221,11 @@ suite "structured data and sitemap":
       # A top-level key, so it goes before the file's first table.
       writeFile(root / "site.toml", "base_path = \"/blog\"\n" & readFile(root / "site.toml")))
     defer: removeDir(root)
-    # Pages are written under the base path, like their URLs.
-    check fileExists(output / "blog/about/index.html")
-    let first = readFile(output / "blog/posts/first/index.html")
+    # The output root is the base path's root: URLs carry the base path,
+    # output paths do not.
+    check fileExists(output / "about/index.html")
+    check not dirExists(output / "blog")
+    let first = readFile(output / "posts/first/index.html")
     check first.contains("https://example.org/blog/posts/first/")
     let scripts = scriptElements(first)
       .filterIt(it.attr("type") == "application/ld+json")
@@ -231,7 +233,7 @@ suite "structured data and sitemap":
     let ld = parseJson(scripts[0].innerText)
     check ld["author"]["url"].getStr == "https://example.org/blog/about/"
     check ld["publisher"]["url"].getStr == "https://example.org/blog/about/"
-    check readFile(output / "blog/atom.xml").contains("<uri>https://example.org/blog/about/</uri>")
+    check readFile(output / "atom.xml").contains("<uri>https://example.org/blog/about/</uri>")
 
   test "the sitemap lists indexable pages with lastmod and never drafts or future posts":
     putEnv("SOURCE_DATE_EPOCH", "1704067200")

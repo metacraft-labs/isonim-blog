@@ -142,8 +142,10 @@ proc headersFor*(pagePolicies: openArray[tuple[url, policy: string]]): string =
 
 proc redirectsFor*(site: Site): string =
   ## One permanent `_redirects` rule per `redirect_from` entry of an output
-  ## page, sorted by source. A source claimed twice, or equal to a page's
-  ## own URL, is an error naming the pages involved.
+  ## page, sorted by source. The source is the old URL's path from the
+  ## output root (without `base_path`) and the target the page's URL (with
+  ## it). A source claimed twice, or equal to a page's own URL, is an error
+  ## naming the pages involved.
   var owners = initTable[string, string]()
   var targets = initTable[string, string]()
   var pageUrls = initTable[string, string]()
@@ -152,12 +154,17 @@ proc redirectsFor*(site: Site): string =
   for page in site.pages:
     if not page.output: continue
     for value in page.redirectFrom:
-      let source =
+      let url =
         try: redirectSource(site.config.basePath, value)
         except BlogError as cause: fail(page.source & ": " & cause.msg)
+      # The host matches a rule's source against the path it serves from the
+      # output root, which is the base path's root, so the source carries no
+      # base path; the target is the URL the visitor's browser follows, so
+      # it does.
+      let source = outputRoute(site.config.basePath, url)
       if owners.hasKey(source):
         fail("redirect_from " & value & " is claimed by " & owners[source] & " and " & page.source)
-      let bare = source.strip(leading = false, chars = {'/'})
+      let bare = url.strip(leading = false, chars = {'/'})
       if pageUrls.hasKey(bare):
         fail(page.source & ": redirect_from " & value & " is the URL of " & pageUrls[bare])
       owners[source] = page.source
@@ -408,7 +415,10 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   var pagePolicies: seq[tuple[url, policy: string]]
   for page in site.pages & generatedPages(site):
     if not page.output: continue
-    let rel = outputPath(page.url)
+    # The output root is the base path's root: the URL keeps base_path, the
+    # file path does not.
+    let route = outputRoute(basePath, page.url)
+    let rel = outputPath(route)
     if origins.hasKey(rel.toLowerAscii):
       fail("output collision: " & origins[rel.toLowerAscii] & " and " & page.source)
     origins[rel.toLowerAscii] = page.source
@@ -456,20 +466,27 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
         for script in keptScripts:
           if script.src.len > 0: directive.sources.add script.src
         if directive.sources.len == 0 and keptScripts.len == 0: directive.sources = @["'none'"]
-    pagePolicies.add (page.url, cspHeaderValue(policy, inlineScriptBodies(keptScripts)))
+    # `_headers` rules are matched by the host against paths from the
+    # output root, so they name the route, not the URL.
+    pagePolicies.add (route, cspHeaderValue(policy, inlineScriptBodies(keptScripts)))
     # The sitemap lists neither drafts and noindex pages nor posts dated
     # after the build date (present only with --future), nor a listing page
     # that lists only such posts.
-    pages.add SitePage(route: page.url, html: document, lastmod: page.updated,
+    pages.add SitePage(route: route, html: document, lastmod: page.updated,
       noindex: page.noindex or page.future or page.listsOnlyPreviews)
   for file in images.files: addFile(file.path, file.content, "image variant")
   site.warnings.add images.warnings
-  for (path, content) in siteFeeds(site): addFile(path[1..^1], content, "generated feed " & path)
-  let sitemapPath = site.config.basePath & "/sitemap.xml"
-  addFile(sitemapPath[1..^1], renderSitemap(sitemapEntriesFor(pages, site.config.url)), "generated sitemap")
-  # A site's own static/robots.txt replaces the generated one.
-  if not origins.hasKey("robots.txt"):
-    addFile("robots.txt", renderRobots(site.config.url & sitemapPath), "generated robots.txt")
+  for (path, content) in siteFeeds(site):
+    addFile(outputRoute(basePath, path)[1..^1], content, "generated feed " & path)
+  # Pages are exported by route, so the sitemap's base URL carries the base
+  # path that the routes leave out.
+  addFile("sitemap.xml", renderSitemap(sitemapEntriesFor(pages, site.config.url & basePath)),
+    "generated sitemap")
+  # Crawlers read robots.txt only at the root of a host (RFC 9309 §2.3), so
+  # a site under a base path, whose output root is not the host's root,
+  # gets none. A site's own static/robots.txt replaces the generated one.
+  if basePath.len == 0 and not origins.hasKey("robots.txt"):
+    addFile("robots.txt", renderRobots(site.config.url & "/sitemap.xml"), "generated robots.txt")
   # A site's own static/_headers and static/_redirects (the deploy recipe
   # generates both) are extended, never replaced.
   appendGenerated(files, origins, "_headers", headersFor(pagePolicies), "generated script policy")

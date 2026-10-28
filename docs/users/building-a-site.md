@@ -62,7 +62,7 @@ directories are refused rather than followed.
 title = "Field Notes"                 # required
 description = "A small technical notebook"
 url = "https://notes.example.net"     # canonical origin; required to build (see below)
-base_path = ""                        # for a site served under a sub-path
+base_path = ""                        # for a site served under a sub-path (see below)
 language = "en"
 timezone = "UTC"                      # an IANA zone; decides the build date
 permalink = "/posts/:slug/"           # default for posts
@@ -212,8 +212,10 @@ at that URL is an error naming both. `index = ""` turns the post index off.
   and future-dated posts, with `lastmod` from `updated` (or the date); a
   listing page's `lastmod` is the newest among its published posts. A listing
   that lists only drafts or future posts (in a `--drafts` or `--future`
-  preview) is left out too. `robots.txt` points
-  to it, unless the site provides its own `static/robots.txt`.
+  preview) is left out too. A site at the root of its host also gets a
+  `robots.txt` that points to it, unless the site provides its own
+  `static/robots.txt`; a site under a `base_path` gets none (see
+  [Serving under a sub-path](#serving-under-a-sub-path)).
 - **JSON-LD.** A post carries a schema.org `BlogPosting` with the site author
   as a `Person` (a root-relative author `url` is a path under `base_path`);
   the site root carries a `WebSite`; other pages carry a
@@ -227,6 +229,49 @@ subdomains, or any name under `.example`), such as the placeholder that
 `new site` writes, builds with a warning naming it: canonical links, feeds and
 the sitemap would point there. Replace it with the origin the site is deployed
 at.
+
+## Serving under a sub-path
+
+Set `base_path` when the site is served below the root of its host, for
+example at `https://example.net/blog/` (`base_path = "/blog"`; a trailing
+slash is ignored). The model is the one Hugo (`baseURL` with a path), Jekyll
+(`baseurl`), Eleventy (`pathPrefix`), Astro (`base`) and Zola use: **the
+output directory is the base path's root.**
+
+- Every URL the build writes carries the base path: links between pages,
+  stylesheets, images and their responsive variants, the islands bundle,
+  canonical links, OpenGraph and Twitter image URLs, JSON-LD, feed links and
+  entries, sitemap locations, and the targets of `redirect_from` rules. A
+  permalink (`/posts/:slug/`), a feed path (`/feed.xml`) and a `redirect_from`
+  entry (`/old/`) are written without it; the build adds it. A root-relative
+  `url` in `site.toml`, such as the author's `/about/`, is a path of the site
+  too, so it becomes `/blog/about/`.
+- No file is written under the base path. `/blog/posts/hello/` is
+  `public/posts/hello/index.html`, `/blog/feed.xml` is `public/feed.xml`, and
+  `static/favicon.ico` is `public/favicon.ico`, served at
+  `/blog/favicon.ico`. Deploy `public/` so that the host serves it at
+  `/blog/`: as a GitHub Pages project site, behind a reverse proxy that
+  forwards `/blog/` to it, or copied into the `blog/` directory of the host's
+  document root.
+- No `robots.txt` is generated. Crawlers read `robots.txt` only at the root of
+  a host ([RFC 9309 §2.3](https://www.rfc-editor.org/rfc/rfc9309#section-2.3)),
+  and the output root of a site under a base path is not the host's root. Add
+  the rules, and a `Sitemap:` line naming `https://example.net/blog/sitemap.xml`,
+  to the `robots.txt` of whatever serves the host's root. A
+  `static/robots.txt` is still copied, but crawlers ignore it at
+  `/blog/robots.txt`.
+- Host configuration files in the output (`_headers`, `_redirects`) are read
+  by a host that serves `public/` as its own root, so their paths are paths
+  from the output root: a `redirect_from` rule reads
+  `/old/ /blog/posts/hello/ 301`, its source without the base path and its
+  target, the address the visitor's browser follows, with it. Cloudflare
+  Pages serves a project at the root of its own hostname, so a Pages site
+  under a sub-path of another host needs a proxy in front of it that forwards
+  `/blog/` with the prefix removed.
+- `isonim-blog serve` serves `public/` at the base path
+  (`http://127.0.0.1:4000/blog/`), so the preview resolves the same URLs as
+  the deployed site; other paths answer 404. `isonim-blog check` follows the
+  links the same way.
 
 ## Images and OpenGraph images
 

@@ -143,7 +143,8 @@ proc references*(tag: StartTag): seq[string] =
 
 type
   OutputTree = object
-    root, origin: string  ## the output directory; the site origin (no slash)
+    root, origin: string  ## the output directory; the URL it is served at
+                          ## (origin and base path, no trailing slash)
     anchors: Table[string, HashSet[string]]  ## ids of every page, by file
 
 proc pageUrl(rel: string): string =
@@ -312,8 +313,9 @@ proc checkFeed*(content: string): seq[string] =
 
 proc checkOutput*(output, origin: string; analytics: JsonNode; report: var CheckReport;
                   externalUrls: var seq[string]) =
-  ## Check every built page under `output` for a site served at `origin`,
-  ## whose `[output] analytics` table is `analytics`.
+  ## Check every built page under `output` for a site whose output root is
+  ## served at `origin` (its url plus its base path, as in `https://x/blog`),
+  ## and whose `[output] analytics` table is `analytics`.
   let provider = if analytics.isNil: "none" else: analytics.stringValue("provider", "none")
   let beacon = if provider == "beacon": analytics.stringValue("src") else: ""
   var tree = OutputTree(root: output, origin: origin.strip(leading = false, chars = {'/'}))
@@ -415,7 +417,9 @@ proc checkSite*(root: string; options = CheckOptions()): CheckReport =
     if line.startsWith("warning: ") and line[9..^1] notin site.warnings:
       result.add(svWarning, "build", line[9..^1])
   var externalUrls: seq[string]
-  checkOutput(output, site.config.url, site.config.analytics, result, externalUrls)
+  # The output root is the base path's root, so the site's URLs map to
+  # files once origin and base path are taken off.
+  checkOutput(output, site.config.url & site.config.basePath, site.config.analytics, result, externalUrls)
   if options.external:
     for url in externalUrls:
       let problem = externalStatus(url)
