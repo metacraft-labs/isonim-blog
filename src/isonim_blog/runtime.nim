@@ -3,6 +3,7 @@ import std/[os, strutils, json, tables, sets, algorithm, uri]
 import ./[model, inputs, version, html_checks, archives, listing, syndication, og]
 import isonim/content/[markdown, prose, directives]
 import isonim/static/[exporter, buildinfo, assets, head, csp, sitemap, robots, ogimage, feeds]
+from isonim/static/urls import webOrigin
 import isonim/dsl/ui
 import isonim/ssr/escape
 export model, listing, directives
@@ -78,6 +79,11 @@ proc ogImageConfig(): OgImageConfig =
   if result.fontFiles.len == 0: fail("no .ttf or .otf font in ISONIM_BLOG_OG_FONTS: " & fonts)
   result.defaultFontFamily = "DejaVu Sans"
 
+const siteCardPath = "assets/og/_site.png"
+  ## The one card listing pages share, fingerprinted like the page cards.
+  ## Only a page at `/_site/` has a card of the same stem; the hash keeps
+  ## the two apart, and identical bytes would fail as an output collision.
+
 proc ogImagePath(site: Site; url, png: string): string =
   ## `assets/og/<page path>.<hash>.png`: fingerprinted like other assets,
   ## named after the page so the tree stays readable.
@@ -85,6 +91,22 @@ proc ogImagePath(site: Site; url, png: string): string =
   if key.endsWith(".html"): key.setLen(key.len - 5)
   if key.len == 0: key = "index"
   hashedAssetName("assets/og/" & key & ".png", png)
+
+proc checkImageAlt*(doc: MarkdownDoc; source: string) =
+  ## Markdown cannot tell an image without alt text from a decorative one:
+  ## both are `![](src)`. An empty alt text is therefore an error unless the
+  ## image is marked `{decorative}`, which renders `alt=""`; a decorative
+  ## image with alt text is contradictory and an error too. Errors name the
+  ## source file and the image's line. (Layouts write HTML, where a missing
+  ## `alt` and `alt=""` differ; `rewritePageImages` checks those.)
+  for image in proseImages(doc.blocks):
+    let where = source & ":" & $image.line & ": the image " & image.href
+    if image.decorative and image.text.strip.len > 0:
+      fail(where & " is marked {decorative} but has alt text; keep one: ![" & image.text &
+        "](...) describes it, ![](...){decorative} hides it from assistive technology")
+    if not image.decorative and image.text.strip.len == 0:
+      fail(where & " has no alt text: describe it (![what it shows](...)), or mark it " &
+        "decorative if it adds no information (![](...){decorative})")
 
 proc rootRelativeHtml*(html, pageUrl: string): string =
   ## `html` written for the page at `pageUrl`, with every page-relative
@@ -356,6 +378,7 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
       resolveContentPath = proc(path: string): string =
         if not routes.hasKey(path): fail(source & ": missing content target " & path)
         routes[path], firstLine = page.bodyLine)
+    checkImageAlt(doc, source)
     page.content = renderProseHtml(doc)
     if page.toc: page.content = renderTocHtml(doc.headingTree) & page.content
     if page.excerpt.len == 0: page.excerpt = renderProseHtml(doc.excerpt)
@@ -383,16 +406,36 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   var imageFormats: seq[ImageFormat]
   for name in site.config.imageFormats: imageFormats.add parseImageFormat(name)
   let basePath = site.config.basePath
+  # The site's own origin (that of `url`) is not a remote host: the CSP's
+  # 'self' already allows it, so an absolute URL on it is accepted without
+  # being listed, and it is never added to `img-src`.
+  let ownOrigin = webOrigin(site.config.url)
+  var imageOrigins = site.config.remoteImageOrigins
+  if ownOrigin.len > 0 and ownOrigin notin imageOrigins: imageOrigins.add ownOrigin
   let images = newResponsiveImages(ImageVariantConfig(vipsPath: getEnv("ISONIM_BLOG_VIPS"),
     widths: site.config.imageWidths, formats: imageFormats,
-    maxSourceBytes: site.config.maxImageBytes, cacheDir: options.imageCache),
+    maxSourceBytes: site.config.maxImageBytes, cacheDir: options.imageCache,
+    avifQuality: site.config.imageQuality.avif, webpQuality: site.config.imageQuality.webp,
+    remoteOrigins: imageOrigins),
     proc(path: string): string = basePath & "/" & path)
   var ogConfig: OgImageConfig
   var ogConfigured = false
+  var siteCardUrl = ""
+  proc renderCard(page: Page; source: string): string =
+    ## The template's card for `page` as PNG bytes.
+    if not ogConfigured:
+      ogConfig = ogImageConfig()
+      ogConfigured = true
+    try: renderOgImage(ogTemplate(page, site), ogConfig)
+    except OgImageError as cause: fail(source & ": OpenGraph image: " & cause.msg)
   proc ogImageUrl(page: Page): string =
     ## The absolute URL of the page's OpenGraph image: its `og_image` (a URL,
     ## or a file of the site named relative to the page's source or to the
-    ## site root), else a card rendered from the template.
+    ## site root), else, for a content page, a card rendered from the
+    ## template. Listing pages (the index, tag, category and archive pages and
+    ## their pagination) are rarely shared and say nothing of their own, so
+    ## they share one site card instead of a card each, as Hugo's and
+    ## Docusaurus's site-wide images do.
     let value = page.ogImage.strip()
     if value.len > 0:
       let lower = value.toLowerAscii
@@ -402,12 +445,20 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
         if rewrite.original == path: return site.config.url & rewrite.hashed
       if siteFiles.hasKey(basePath & path): return site.config.url & basePath & path
       fail(page.source & ": og_image " & value & " is not a file of the site")
-    if not ogConfigured:
-      ogConfig = ogImageConfig()
-      ogConfigured = true
-    let png =
-      try: renderOgImage(ogTemplate(page, site), ogConfig)
-      except OgImageError as cause: fail(page.source & ": OpenGraph image: " & cause.msg)
+    if page.kind != pkContent:
+      if siteCardUrl.len == 0:
+        # The template sees the site as a listing page whose title is the
+        # site's description (its title when it has none), with no date.
+        let card = Page(kind: pkIndex, title: (if site.config.description.len > 0:
+          site.config.description else: site.config.title),
+          description: site.config.description, url: basePath & "/", layout: "index",
+          source: "site.toml", output: true, pageNumber: 1, pageCount: 1)
+        let png = renderCard(card, "site card")
+        let path = hashedAssetName(siteCardPath, png)
+        addFile(path, png, "OpenGraph site card")
+        siteCardUrl = site.config.url & basePath & "/" & path
+      return siteCardUrl
+    let png = renderCard(page, page.source)
     let path = ogImagePath(site, page.url, png)
     addFile(path, png, "OpenGraph image of " & page.source)
     site.config.url & basePath & "/" & path
@@ -452,7 +503,9 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
             else: ImageReference(kind: irMissing))
       except ImageError as cause:
         fail(cause.msg & (if "not configured" in cause.msg:
-          " (ISONIM_BLOG_VIPS is not set: enter nix develop or use the packaged CLI)" else: ""))
+          " (ISONIM_BLOG_VIPS is not set: enter nix develop or use the packaged CLI)"
+          elif "not an allowed remote image origin" in cause.msg:
+          " (list it in [images] remote_origins in site.toml)" else: ""))
     var actualScripts = 0
     for script in scriptElements(document):
       if script.attr("type").toLowerAscii != "application/ld+json": inc actualScripts
@@ -466,6 +519,9 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
         for script in keptScripts:
           if script.src.len > 0: directive.sources.add script.src
         if directive.sources.len == 0 and keptScripts.len == 0: directive.sources = @["'none'"]
+      elif directive.name == "img-src":
+        for origin in site.config.remoteImageOrigins:
+          if origin != ownOrigin: directive.sources.add origin
     # `_headers` rules are matched by the host against paths from the
     # output root, so they name the route, not the URL.
     pagePolicies.add (route, cspHeaderValue(policy, inlineScriptBodies(keptScripts)))

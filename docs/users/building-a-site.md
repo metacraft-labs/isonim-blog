@@ -93,6 +93,8 @@ full_content = true                   # false: the excerpt only
 widths = [480, 960, 1600]             # variant widths, in pixels
 formats = ["avif", "webp"]            # variant formats: "avif" and/or "webp"
 max_source_bytes = 2_000_000          # a larger image is an error
+quality = { avif = 50, webp = 75 }    # variant encoder quality, 1 to 100
+remote_origins = []                   # origins pages may show images from
 
 [output]
 scripts = "none"                      # "none" (default) or "islands"
@@ -122,7 +124,7 @@ Front matter is a YAML subset between `---` lines.
 | `layout`                                                              | Layout name (default `post` for posts, `page` otherwise)                                    |
 | `tags`, `categories`                                                  | Lists; when `data/tags.toml` exists, every tag must be declared there                       |
 | `draft`                                                               | `true` keeps a file under `posts/` out of builds without `--drafts`                         |
-| `image`, `image_alt`                                                  | Hero image; the alt text is required when an image is set                                   |
+| `image`, `image_alt`                                                  | Hero image; `image_alt` is required with it (`image_alt: ""` for a decorative image)        |
 | `series`, `series_order`                                              | Series navigation: posts sharing `series`, read in `series_order`, then date and slug       |
 | `og_image`, `excerpt`, `toc`, `noindex`, `canonical`, `redirect_from` | Further page settings                                                                       |
 | anything else                                                         | Kept unchanged in `page.extra`                                                              |
@@ -291,15 +293,54 @@ served responsively:
   removed.
 - SVGs pass through unchanged (with their declared size when they have one),
   and so do GIFs and animated images, which resizing would freeze.
-- The first image of a page loads normally; every later one gets
-  `loading="lazy"`.
-- An image without alt text, one larger than `[images] max_source_bytes`, or
-  a site path that names no file is an error naming the page. An image on
-  another site keeps its markup, with a warning that it has no dimensions.
+- The images of the page's main content, those inside its `<main>` element
+  (every image, on a page without one), get `decoding="async"`. The first of
+  them loads normally, because it is usually the largest thing on the screen
+  when the page opens; every later one gets `loading="lazy"`. Images outside
+  `<main>`, such as a logo in the header, keep the loading the layout gave
+  them. A `loading` or `decoding` attribute the layout sets is kept.
+- An image larger than `[images] max_source_bytes`, or a site path that names
+  no file, is an error naming the page.
+- Variants are encoded at `[images] quality`: `avif` and `webp`, each from 1
+  to 100 (default AVIF 50, WebP 75). Lower values make smaller, softer
+  files; changing a value re-encodes the variants it affects.
+
+**Alt text.** Every image needs alt text that says what it shows, or an
+explicit statement that it is decorative (it adds nothing a reader would
+miss, like a divider or an ornament), so a screen reader skips it:
+
+- In Markdown, `![A green hill under a blue sky](photo.png)` describes an
+  image, and `![](rule.png){decorative}` marks one decorative; it is written
+  with `alt=""`. A plain `![](photo.png)` is an error, because Markdown
+  cannot tell a forgotten description from a decorative image. So is a
+  decorative image with alt text. These errors name the file and the line.
+- In a layout, `<img alt="">` (`img(src = ..., alt = "")`) is a decorative
+  image, and an `<img>` with no `alt` attribute is an error, as is alt text of
+  only spaces.
+- A front-matter `image` needs `image_alt`; `image_alt: ""` marks it
+  decorative.
+
+**Images on other sites.** An image whose `src` is on another site must be on
+an origin listed in `[images] remote_origins` (`scheme://host[:port]`, such
+as `"https://cdn.example.net"`); any other is an error, and so is a
+protocol-relative `//host/...` source. The listed origins are added to the
+Content-Security-Policy's `img-src` (see [Zero JavaScript by default](#zero-javascript-by-default)),
+so the browser shows what the build accepted. A remote image keeps its
+markup. The build does not download it, so it cannot measure it: unless the
+`<img>` has both `width` and `height` (a layout can set them; Markdown cannot),
+the build warns that it has no dimensions, because the page will shift when
+it loads. `data:` URLs are allowed. An absolute URL on the site's own origin
+(the origin of `url`) needs no listing: the policy's `'self'` already allows
+it. A root-relative path such as `/assets/photo.png` is still the better
+form, because only a site file is measured and gets variants.
 
 Every page also gets an OpenGraph image: a 1200x630 PNG referenced by
 `og:image` and `twitter:image`, with a `summary_large_image` Twitter card.
-It is rendered from an SVG template with [resvg](https://github.com/linebender/resvg)
+Posts and pages each get their own card. Listing pages (the post index and
+its pages, tag, category and archive pages) share one site card, the
+template's card for a listing page whose title is the site's `description`
+(its `title` when there is none); a template can tell it apart by
+`page.kind != pkContent`. The cards are rendered from an SVG template with [resvg](https://github.com/linebender/resvg)
 and the bundled DejaVu fonts; the fonts installed on the machine are never
 used. The built-in template shows the site title, the page title and the
 post date. A site (or theme) replaces it with `og.svg.nim` at its root, a
@@ -336,7 +377,8 @@ With `scripts = "none"`, a built page contains no `<script>` element other
 than `application/ld+json` and the configured analytics snippet. A layout
 that emits any other script element, including an inert data block, fails the
 build. The generated `_headers` carries a Content-Security-Policy whose
-`script-src` names only the scripts the pages load. The script policy is
+`script-src` names only the scripts the pages load and whose `img-src`
+adds the origins in `[images] remote_origins`. Both are
 site-wide, so this is one rule for every path (`/*`), which keeps even a large
 site far below Cloudflare Pages' limit of 100 header rules; a site's own
 `static/_headers` is kept and the generated rules are appended to it.

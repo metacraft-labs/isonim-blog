@@ -78,19 +78,23 @@ suite "check":
     defer: removeDir(output)
     writeFile(output / "index.html", "<!doctype html><html><body>" &
       "<img src=\"/a.png\"><img src=\"/a.png\" alt=\" \"><img src=\"/a.png\" alt=\"A\">" &
+      # alt="" marks a decorative image, so it is not reported (its own
+      # source, so a report could not hide behind /a.png's).
+      "<img src=\"/d.png\" alt=\"\"><img src=\"/d.png\" alt>" &
       "<script src=\"/tracker.js\"></script><script src=\"/beacon.js\"></script>" &
       "<script type=\"application/ld+json\">{}</script>" &
       "<a href=\"https://example.org/a.png\">self</a><a href=\"https://other.example/x\">x</a>" &
       "<a href=\"//cdn.example/y\">y</a><img alt=\"s\" srcset=\"/a.png 1x, /missing.png 2x\">" &
       "</body></html>")
-    for name in ["a.png", "tracker.js", "beacon.js"]: writeFile(output / name, "")
+    for name in ["a.png", "d.png", "tracker.js", "beacon.js"]: writeFile(output / name, "")
     var report: CheckReport
     var external: seq[string]
     checkOutput(output, "https://example.org", %*{"provider": "beacon", "src": "/beacon.js"},
       report, external)
     check report.messages(svError).sorted() == @[
       "index.html: broken link /missing.png",
-      "index.html: image without alt text: /a.png",
+      "index.html: image whose alt text is only whitespace: /a.png",
+      "index.html: image without an alt attribute: /a.png",
       "index.html: undeclared script /tracker.js"]
     check report.messages(svInfo) == @["index.html: loads /beacon.js: the configured analytics beacon"]
     check external == @["https://cdn.example/y", "https://other.example/x"]

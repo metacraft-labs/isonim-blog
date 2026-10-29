@@ -68,15 +68,28 @@ suite "OpenGraph images":
       images.add readFile(file)
     # One card per post, each showing its own title.
     check images.deduplicate.len == posts.len
-    # Every other page gets one too (pages and generated listings).
-    for page in ["index.html", "about/index.html", "tags/nim/index.html", "2020/index.html"]:
-      check metas(first.output / page)["og:image"].startsWith("https://example.org/assets/og/")
+    # Content pages (here also the home page, pages/index.md) get their own.
+    for page in ["index.html", "about/index.html"]:
+      let url = metas(first.output / page)["og:image"]
+      check url.startsWith("https://example.org/assets/og/") and "/_site." notin url
+    # Listing pages share one site card instead of a card each.
+    let siteCard = metas(first.output / "posts/index.html")["og:image"]
+    check siteCard.startsWith("https://example.org/assets/og/_site.") and siteCard.endsWith(".png")
+    for page in ["posts/page/2/index.html", "tags/nim/index.html", "categories/media/index.html",
+        "2020/index.html", "2021/index.html"]:
+      check metas(first.output / page)["og:image"] == siteCard
+      check metas(first.output / page)["twitter:image"] == siteCard
+    let siteFile = first.output / siteCard["https://example.org/".len .. ^1]
+    check header(siteFile, "width") == "1200" and header(siteFile, "height") == "630"
+    check readFile(siteFile) notin images
     # A second build, from another copy at another path, is byte-identical.
     let second = build()
     defer: removeDir(second.root)
     check first.root != second.root
     check tree(first.output) == tree(second.output)
-    check tree(first.output).filterIt(it.path.startsWith("assets/og/")).len == 17
+    # Eight content pages and one site card, where every one of the 17 pages
+    # used to get its own.
+    check tree(first.output).filterIt(it.path.startsWith("assets/og/")).len == 9
 
   test "og_image overrides the generated card":
     putEnv("SOURCE_DATE_EPOCH", "1704067200")
@@ -135,3 +148,26 @@ suite "OpenGraph images":
       for key, value in envPairs():
         if key != name: env[key] = value
       check name in failure(root, env)
+
+  test "the site card is the template's card for a listing page titled with the site description":
+    putEnv("SOURCE_DATE_EPOCH", "1704067200")
+    defer: delEnv("SOURCE_DATE_EPOCH")
+    # A template that paints content pages red and anything else blue, and
+    # marks its title's length in the width of a white bar.
+    let (root, output) = build(setup = proc(root: string) =
+      writeFile(root / "og.svg.nim", "import isonim_blog/[model, og]\n" &
+        "proc ogImage*(page: Page; site: Site): string =\n" &
+        "  let fill = if page.kind == pkContent: \"#ff0000\" else: \"#0000ff\"\n" &
+        "  \"<svg xmlns=\\\"http://www.w3.org/2000/svg\\\" viewBox=\\\"0 0 1200 630\\\">\" &\n" &
+        "    \"<rect width=\\\"1200\\\" height=\\\"630\\\" fill=\\\"\" & fill & \"\\\"/>\" &\n" &
+        "    \"<rect y=\\\"600\\\" height=\\\"30\\\" width=\\\"\" & $(page.title.len * 10) & \"\\\" fill=\\\"#ffffff\\\"/></svg>\"\n"))
+    defer: removeDir(root)
+    let card = metas(output / "tags/nim/index.html")["og:image"]
+    let file = output / card["https://example.org/".len .. ^1]
+    check pixel(file, 10, 10) == "0 0 255 255"
+    # "A small technical notebook" (site.toml's description) is 26 characters.
+    check pixel(file, 255, 615) == "255 255 255 255"
+    check pixel(file, 265, 615) == "0 0 255 255"
+    # Positive control: a content page's card is red.
+    let post = metas(output / "posts/first/index.html")["og:image"]
+    check pixel(output / post["https://example.org/".len .. ^1], 10, 10) == "255 0 0 255"

@@ -112,7 +112,9 @@ Builds the site as production does (no drafts, no future posts) into
   layouts are checked as well as links in Markdown.
 - **Front matter.** A missing description, or one longer than 160 characters,
   which `build` only warns about, is an error here.
-- **Alt text.** Every image has non-empty alt text.
+- **Alt text.** Every image has an `alt` attribute: alt text, or `alt=""`
+  for a decorative image. A missing attribute, or alt text of only spaces, is
+  an error.
 - **Scripts.** Every page that carries a script other than JSON-LD is listed
   with the reason: the declared islands bundle or the configured analytics.
 - **Feeds.** Every RSS and Atom feed the pages link is well-formed, has the

@@ -3,6 +3,8 @@
 import std/[json, strutils, tables, algorithm, times, uri]
 import isonim/content/frontmatter
 import isonim/static/scripts
+from isonim/static/images import defaultAvifQuality, defaultWebpQuality
+from isonim/static/urls import parseWebOrigin
 export json, tables, frontmatter, scripts
 
 type
@@ -33,6 +35,11 @@ type
     imageWidths*: seq[int]     ## `[images] widths`: variant widths in pixels.
     imageFormats*: seq[string] ## `[images] formats`: "avif" and/or "webp".
     maxImageBytes*: int        ## `[images] max_source_bytes`: larger is an error.
+    imageQuality*: tuple[avif, webp: int]
+      ## `[images] quality`: encoder quality 1-100 per variant format.
+    remoteImageOrigins*: seq[string]
+      ## `[images] remote_origins`: the origins (`https://cdn.example.net`)
+      ## pages may show images from; they are added to the CSP `img-src`.
   PageKind* = enum
     ## What produced a page: a content file, or one of the generated listings.
     pkContent, pkIndex, pkTag, pkCategory, pkYear, pkMonth
@@ -287,8 +294,10 @@ proc intList(node: JsonNode; key: string; default: openArray[int]): seq[int] =
 
 proc parseImages(config: var SiteConfig) =
   ## `[images]`: the widths and formats of responsive variants and the
-  ## largest source accepted. The defaults are the values in the
-  ## documented example (480, 960 and 1600 pixels; AVIF and WebP; 2 MB).
+  ## largest source accepted, the encoder quality and the origins remote
+  ## images may come from. The defaults are the values in the documented
+  ## example (480, 960 and 1600 pixels; AVIF and WebP; 2 MB; quality AVIF 50
+  ## and WebP 75; no remote origin).
   let images = config.images
   config.imageWidths = images.intList("widths", [480, 960, 1600])
   config.imageFormats = @[]
@@ -304,6 +313,30 @@ proc parseImages(config: var SiteConfig) =
     if images["max_source_bytes"].kind != JInt or images["max_source_bytes"].getInt <= 0:
       fail("images.max_source_bytes must be a positive integer")
     config.maxImageBytes = images["max_source_bytes"].getInt
+  # Encoder quality, per format. The defaults are those of AVIF Q50 and WebP
+  # Q75 that every variant was made with before the setting existed.
+  config.imageQuality = (avif: defaultAvifQuality, webp: defaultWebpQuality)
+  if images.hasKey("quality"):
+    let quality = images["quality"]
+    if quality.kind != JObject:
+      fail("images.quality must be a table, as in quality = { avif = 50, webp = 75 }")
+    for key, value in quality:
+      if key notin ["avif", "webp"]: fail("images.quality may name only avif and webp, not " & key)
+      if value.kind != JInt or value.getInt notin 1 .. 100:
+        fail("images.quality." & key & " must be an integer from 1 to 100")
+      if key == "avif": config.imageQuality.avif = value.getInt
+      else: config.imageQuality.webp = value.getInt
+  # Remote images: only from the origins listed, which also go into the
+  # Content-Security-Policy, so what the build accepts the browser loads.
+  config.remoteImageOrigins = @[]
+  if images.hasKey("remote_origins"):
+    if images["remote_origins"].kind != JArray: fail("images.remote_origins must be a list of origins")
+    for item in images["remote_origins"]:
+      if item.kind != JString: fail("images.remote_origins must be a list of origins")
+      let origin =
+        try: parseWebOrigin(item.getStr)
+        except ValueError as cause: fail("images.remote_origins: " & cause.msg)
+      if origin notin config.remoteImageOrigins: config.remoteImageOrigins.add origin
 
 proc parseConfig*(node: JsonNode): SiteConfig =
   ## Map decoded TOML without throwing away unknown top-level values.
@@ -458,7 +491,10 @@ proc pageFromSource*(source, raw, collection, defaultPattern: string;
   result.seriesOrder = fm.getInt("series_order")
   result.image = fm.getStr("image")
   result.imageAlt = fm.getStr("image_alt")
-  if result.image.len > 0 and result.imageAlt.len == 0: fail(source & ": image_alt is required")
+  # An empty image_alt is an explicit decorative image, as alt="" is; only
+  # a missing one is an error.
+  if result.image.len > 0 and "image_alt" notin fm:
+    fail(source & ": image_alt is required with image (image_alt: \"\" marks a decorative image)")
   result.ogImage = fm.getStr("og_image")
   result.excerpt = fm.getStr("excerpt")
   result.noindex = result.draft or fm.getBool("noindex")

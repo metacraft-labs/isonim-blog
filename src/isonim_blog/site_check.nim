@@ -9,7 +9,8 @@
 ##   `id` (or `<a name>`) of the target page. The check reads the built HTML,
 ##   so links written by layouts and includes are covered as well as Markdown
 ##   links.
-## * Alt text: every `<img>` has a non-empty `alt`.
+## * Alt text: every `<img>` has an `alt` attribute that is empty (a
+##   decorative image) or not only whitespace.
 ## * Scripts: every page that carries a script element other than JSON-LD
 ##   is listed with the reason (the declared islands bundle, analytics); any
 ##   other script is an error.
@@ -332,8 +333,12 @@ proc checkOutput*(output, origin: string; analytics: JsonNode; report: var Check
     inc report.pages
     let page = pageUrl(rel)
     for tag in tags:
-      if tag.name == "img" and tag.attr("alt").strip().len == 0:
-        report.add(svError, rel, "image without alt text: " & tag.attr("src"))
+      # alt="" marks a decorative image (HTML: the alt attribute); a missing
+      # attribute, or one of only whitespace, is an error.
+      if tag.name == "img" and not tag.attributes.hasKey("alt"):
+        report.add(svError, rel, "image without an alt attribute: " & tag.attr("src"))
+      elif tag.name == "img" and tag.attr("alt").len > 0 and tag.attr("alt").strip().len == 0:
+        report.add(svError, rel, "image whose alt text is only whitespace: " & tag.attr("src"))
       if tag.name == "script" and tag.attr("type").toLowerAscii != "application/ld+json":
         let src = tag.attr("src")
         if src.len == 0 and provider == "custom":
