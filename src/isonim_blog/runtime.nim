@@ -1,9 +1,10 @@
 ## Content-only execution of a compiled site's layout registry.
-import std/[os, strutils, json, tables, sets, algorithm, uri]
+import std/[os, strutils, json, tables, sets, algorithm, uri, tempfiles]
 from std/unicode import Rune, `$`, runeLen, runeOffset
 from std/htmlparser import entityToUtf8
 import ./[model, inputs, version, html_checks, archives, listing, syndication, og]
 import isonim/content/[markdown, prose, directives]
+import isonim/content/ext/[math, diagrams]
 import isonim/static/[exporter, buildinfo, assets, head, csp, sitemap, robots, ogimage, feeds]
 from isonim/static/urls import webOrigin
 import isonim/dsl/ui
@@ -93,6 +94,40 @@ proc ogImagePath(site: Site; url, png: string): string =
   if key.endsWith(".html"): key.setLen(key.len - 5)
   if key.len == 0: key = "index"
   hashedAssetName("assets/og/" & key & ".png", png)
+
+const contentTools = [("KaTeX", "ISONIM_BLOG_KATEX"), ("D2", "ISONIM_BLOG_D2"), ("Graphviz", "ISONIM_BLOG_DOT")]
+  ## The build-time renderers of maths and diagrams, by the name the content
+  ## extensions report and the variable that injects each by path.
+
+proc contentHooks*(config: SiteConfig; diagramCache: string): seq[ParseHooks] =
+  ## The content extensions `[markdown]` turns on: maths through KaTeX, and
+  ## the listed diagram languages through D2 and Graphviz. Each executable is
+  ## injected by absolute path (`ISONIM_BLOG_KATEX`, `ISONIM_BLOG_D2`,
+  ## `ISONIM_BLOG_DOT`); none is looked up on PATH. An unset one fails only
+  ## when a page uses it (`withToolHint` names the variable). A fence of a
+  ## diagram language the site did not list is an error too: with diagrams
+  ## on, the parser hands both languages to the renderer, and rendering one
+  ## the author did not enable would contradict `site.toml`.
+  if config.math: result.add mathHooks(getEnv("ISONIM_BLOG_KATEX"))
+  if config.diagrams.len > 0:
+    let enabled = config.diagrams
+    let diagramConfig = DiagramConfig(d2Path: getEnv("ISONIM_BLOG_D2"),
+      dotPath: getEnv("ISONIM_BLOG_DOT"), cacheDir: diagramCache)
+    var hooks = ParseHooks(name: "diagrams")
+    hooks.renderers.diagram = proc(language, source: string; location: SourceLocation): ContentFragment =
+      if language notin enabled:
+        raise contentError(location, "a " & language & " diagram, but [markdown] diagrams in " &
+          "site.toml lists only " & enabled.join(", ") & "; add " & language & " to it")
+      renderDiagram(language, source, diagramConfig, location)
+    result.add hooks
+
+proc withToolHint*(message: string): string =
+  ## A content extension's "<tool> not configured" error, with the variable
+  ## that injects the tool and where it is set.
+  for (tool, variable) in contentTools:
+    if message.endsWith(": " & tool & " not configured"):
+      return message & " (" & variable & " is not set: enter nix develop or use the packaged CLI)"
+  message
 
 proc checkImageAlt*(doc: MarkdownDoc; source: string) =
   ## Markdown cannot tell an image without alt text from a decorative one:
@@ -392,8 +427,19 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   if themeDir.len > 0:
     manifest = readThemeManifest(themeDir)
     checkDirectives(manifest.directives, directives, manifest.name)
-  let hooks = if directives.len > 0: @[ParseHooks(name: "directives", directives: directives)]
+  var hooks = if directives.len > 0: @[ParseHooks(name: "directives", directives: directives)]
     else: newSeq[ParseHooks]()
+  # Diagrams are cached by content hash (`--diagram-cache`, which the CLI
+  # keeps under build/isonim-blog/); a build without one (the Nix sandbox)
+  # caches in a directory of its own for the length of the build.
+  var diagramCache = options.diagramCache
+  var temporaryCache = ""
+  if site.config.diagrams.len > 0 and diagramCache.len == 0:
+    temporaryCache = createTempDir("isonim-blog-diagrams-", "")
+    diagramCache = temporaryCache
+  defer:
+    if temporaryCache.len > 0: removeDir(temporaryCache)
+  hooks.add contentHooks(site.config, diagramCache)
   if site.config.url.len == 0:
     fail("url is required (in site.toml or with --url): canonical links, feeds and the sitemap need an absolute origin")
   if isPlaceholderOrigin(site.config.url):
@@ -483,10 +529,14 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   for page in site.pages: routes[page.source] = page.url
   for page in site.pages.mitems:
     let source = page.source
-    let doc = parseMarkdownDocWithHooks(hooks, page.body, page.source,
-      resolveContentPath = proc(path: string): string =
-        if not routes.hasKey(path): fail(source & ": missing content target " & path)
-        routes[path], firstLine = page.bodyLine)
+    let doc =
+      try:
+        parseMarkdownDocWithHooks(hooks, page.body, page.source,
+          resolveContentPath = proc(path: string): string =
+            if not routes.hasKey(path): fail(source & ": missing content target " & path)
+            routes[path], firstLine = page.bodyLine)
+      except BlogError: raise
+      except ValueError as cause: fail(withToolHint(cause.msg))
     checkImageAlt(doc, source)
     page.content = renderProseHtml(doc)
     if page.toc: page.content = renderTocHtml(doc.headingTree) & page.content
@@ -759,7 +809,7 @@ proc siteMain*(layouts: openArray[LayoutEntry]; ogTemplate: OgTemplate = default
       of "--drafts": options.drafts = true
       of "--future": options.future = true
       of "--incremental": options.incremental = true
-      of "--root", "--url", "--now", "--bundle", "--theme", "--image-cache":
+      of "--root", "--url", "--now", "--bundle", "--theme", "--image-cache", "--diagram-cache":
         let flag = args[i]
         inc i
         if i >= args.len: fail("missing value for " & flag)
@@ -769,6 +819,7 @@ proc siteMain*(layouts: openArray[LayoutEntry]; ogTemplate: OgTemplate = default
         of "--now": options.now = args[i]
         of "--theme": options.theme = absolutePath(args[i])
         of "--image-cache": options.imageCache = absolutePath(args[i])
+        of "--diagram-cache": options.diagramCache = absolutePath(args[i])
         else: bundle = args[i]
       else: fail("unknown exporter argument " & args[i])
       inc i

@@ -455,6 +455,19 @@ math[display="block"] {
   margin: 0 auto 1.125rem;
 }
 
+/* Diagrams take their palette from the custom properties the renderer
+ * leaves open (--diagram-background, --diagram-fill, --diagram-foreground,
+ * --diagram-stroke); bound to the theme's tokens, they follow the colour
+ * scheme. Their fallbacks (the system Canvas colour, currentColor) would put
+ * light labels on white shapes in the dark scheme of a theme that, like
+ * this one, sets its own colours instead of color-scheme. */
+.prose svg.isonim-diagram {
+  --diagram-background: var(--sys-color-surface);
+  --diagram-fill: var(--sys-color-surface-raised);
+  --diagram-foreground: var(--sys-color-text);
+  --diagram-stroke: var(--sys-color-text-muted);
+}
+
 /* Footnotes */
 .prose sup a {
   text-decoration: none;

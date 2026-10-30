@@ -12,6 +12,10 @@
 ## (only a browser that enforces the generated policy sees it); a layout that
 ## emits a style attribute, which the policy would block. A layout's `<style>`
 ## element, which the policy allows by its hash, must pass in the browser.
+## Diagram labels a theme's dark palette leaves unreadable and formulas a
+## theme hides must fail; the
+## fixture's maths and diagrams, rendered at build time under the generated
+## policy, must be laid out with the counts the kit reports.
 ##
 ## The shipped theme's handling of wide content is checked here too, in the
 ## browser: by default the fixture's long code lines and wide tables scroll
@@ -129,6 +133,32 @@ control("a layout's <style> element is allowed by its hash in the browser", proc
     "    raw footer\n    raw \"<style>body > footer { outline-offset: 2px; }\\r\\n</style>\"\n"),
   expectPass = true, present = ["PASS WCAG 2.2 AA", "The theme conforms."],
   absent = ["Content-Security-Policy blocked"])
+control("the fixture's maths and diagrams are laid out under the generated policy", proc(theme: string) = discard,
+  expectPass = true, present = ["PASS maths and diagrams are rendered at build time"],
+  absent = ["Content-Security-Policy blocked", "the diagram label", "is not laid out"],
+  inspect = proc(output: string): seq[string] =
+    # One page carries them: an inline and a display formula (one fraction)
+    # and a D2 and a Graphviz diagram with five labels, seen at two widths
+    # in two schemes.
+    if "maths and diagrams laid out: 8 formulas (4 fractions), 8 diagrams (20 labels); 0 hidden" notin output:
+      result.add "unexpected maths and diagram counts")
+control("diagram labels on white shapes in the dark scheme fail in the dark scheme only", proc(theme: string) =
+  # The dark scheme's light labels on shapes and a background left white.
+  let css = theme / "assets/minimal.css"
+  writeFile(css, readFile(css) & "\n@media (prefers-color-scheme: dark) { .prose svg.isonim-diagram " &
+    "{ --diagram-background: #ffffff; --diagram-fill: #ffffff; } }\n"),
+  expectPass = false, present = ["FAIL WCAG 2.2 AA",
+    "(dark, 360px): the diagram label \"publish\" has contrast",
+    "(dark, 1280px): the diagram label \"feed\" has contrast"],
+  absent = ["(light, 360px): the diagram label", "(light, 1280px): the diagram label"])
+control("a theme that takes fractions out of MathML layout fails", proc(theme: string) =
+  let css = theme / "assets/minimal.css"
+  writeFile(css, readFile(css) & "\nmath mfrac { display: flex; }\n"),
+  expectPass = false, present = ["FAIL WCAG 2.2 AA", "(light, 360px): a fraction is not stacked"])
+control("a theme that hides formulas fails", proc(theme: string) =
+  let css = theme / "assets/minimal.css"
+  writeFile(css, readFile(css) & "\nmath { display: none; }\n"),
+  expectPass = false, present = ["FAIL WCAG 2.2 AA", "(light, 360px): a formula is not laid out"])
 control("a theme without a post layout fails naming it", proc(theme: string) =
   removeFile(theme / "layouts/post.nim"),
   expectPass = false, present = ["FAIL required layouts", "missing layouts/post.nim"])

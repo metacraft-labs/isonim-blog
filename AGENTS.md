@@ -22,14 +22,15 @@ just test-theme themes/minimal  # theme conformance kit, axe-core in Chromium
 just test-theme-controls        # the kit must fail for broken themes
 ```
 
-Run the complete suite during development and before every push: seventeen
+Run the complete suite during development and before every push: eighteen
 suites on C, and the three backend-independent suites on JavaScript too.
 After changing a theme, the theme format or the content renderer, also run
 `just test-theme themes/minimal` and `just test-theme-controls`: they drive
 the dev shell's pinned Playwright Chromium and axe-core, so they run outside
 the sandboxed and Reprobuild suites. The site suites compile real site programs with the real
 Nim compiler; no browser is needed. The image and OpenGraph suites run the
-libvips and resvg the dev shell provides; the serve suite runs a real server
+libvips and resvg the dev shell provides, and the maths and diagrams suite
+the KaTeX, D2 and Graphviz it provides; the serve suite runs a real server
 on a loopback port; the check suite starts a local HTTP server for
 `--external`. `test_cli_scaffold` and `test_deploy_recipe` build generated
 site flakes with `nix build` (the deploy suite with a stub `wrangler`), so

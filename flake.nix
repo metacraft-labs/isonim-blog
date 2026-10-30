@@ -71,6 +71,11 @@
             ISONIM_BLOG_VIPS = pkgs.lib.getExe' pkgs.vips "vips";
             ISONIM_BLOG_RESVG = pkgs.lib.getExe pkgs.resvg;
             ISONIM_BLOG_OG_FONTS = "${pkgs.dejavu_fonts}/share/fonts/truetype";
+            # Maths (KaTeX, MathML output) and diagrams (D2, Graphviz), run
+            # at build time only when site.toml's [markdown] turns them on.
+            ISONIM_BLOG_KATEX = pkgs.lib.getExe' pkgs.katex "katex";
+            ISONIM_BLOG_D2 = pkgs.lib.getExe pkgs.d2;
+            ISONIM_BLOG_DOT = pkgs.lib.getExe' pkgs.graphviz "dot";
             # `check --external` requests external links with curl.
             ISONIM_BLOG_CURL = pkgs.lib.getExe pkgs.curl;
           };
@@ -131,7 +136,7 @@
               checkPhase = ''
                 runHook preCheck
                 export HOME="$TMPDIR"
-                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds test_base_path test_static_images test_static_ogimage test_check test_serve_reload test_theme_format test_theme_override test_theme_kit; do
+                for suite in test_plumbing test_model_pure test_site_model test_zero_js_default test_cli_build test_taxonomies test_feeds test_base_path test_static_images test_static_ogimage test_check test_serve_reload test_theme_format test_theme_override test_theme_kit test_math_diagrams; do
                   nim c -r --out:build/tests/$suite --nimcache:build/nimcache/$suite tests/$suite.nim
                 done
                 for suite in test_plumbing test_model_pure test_theme_format; do
@@ -155,6 +160,9 @@
                   --set ISONIM_BLOG_VIPS ${sources.ISONIM_BLOG_VIPS} \
                   --set ISONIM_BLOG_RESVG ${sources.ISONIM_BLOG_RESVG} \
                   --set ISONIM_BLOG_OG_FONTS ${sources.ISONIM_BLOG_OG_FONTS} \
+                  --set ISONIM_BLOG_KATEX ${sources.ISONIM_BLOG_KATEX} \
+                  --set ISONIM_BLOG_D2 ${sources.ISONIM_BLOG_D2} \
+                  --set ISONIM_BLOG_DOT ${sources.ISONIM_BLOG_DOT} \
                   --set ISONIM_BLOG_CURL ${sources.ISONIM_BLOG_CURL} \
                   --prefix PATH : ${
                     pkgs.lib.makeBinPath [

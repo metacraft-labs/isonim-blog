@@ -154,6 +154,9 @@ buildStaticSite {
     ISONIM_BLOG_VIPS = lib.getExe' pkgs.vips "vips";
     ISONIM_BLOG_RESVG = lib.getExe pkgs.resvg;
     ISONIM_BLOG_OG_FONTS = "${pkgs.dejavu_fonts}/share/fonts/truetype";
+    ISONIM_BLOG_KATEX = lib.getExe' pkgs.katex "katex";
+    ISONIM_BLOG_D2 = lib.getExe pkgs.d2;
+    ISONIM_BLOG_DOT = lib.getExe' pkgs.graphviz "dot";
     ISONIM_BLOG_REVISION = self.rev or self.dirtyRev or "unknown";
     postBuild = ''
       bundle_args=()

@@ -89,6 +89,10 @@ atom = "/atom.xml"
 per_tag = true                        # an Atom feed per tag page
 full_content = true                   # false: the excerpt only
 
+[markdown]
+math = false                          # true: $...$, $$...$$ and math fences become MathML
+diagrams = []                         # ["d2", "dot"]: these fences become inline SVG
+
 [images]
 widths = [480, 960, 1600]             # variant widths, in pixels
 formats = ["avif", "webp"]            # variant formats: "avif" and/or "webp"
@@ -387,6 +391,66 @@ path: libvips (`ISONIM_BLOG_VIPS`), resvg (`ISONIM_BLOG_RESVG`) and the font
 directory (`ISONIM_BLOG_OG_FONTS`). Both run with fixed settings, so the same
 inputs give the same bytes; `isonim-blog build` keeps encoded variants under
 `build/isonim-blog/images/` and reuses them.
+
+## Maths and diagrams
+
+With `math = true` in `[markdown]`, maths is rendered at build time to
+[MathML](https://developer.mozilla.org/en-US/docs/Web/MathML), which current
+browsers lay out natively, so a page needs no maths script, stylesheet or
+font:
+
+````markdown
+Inline maths, such as $e^{i\pi} + 1 = 0$, sits in the line of text.
+
+$$
+\sum_{k=1}^{n} k = \frac{n(n+1)}{2}
+$$
+
+```math
+a^2 + b^2 = c^2
+```
+````
+
+A single dollar opens inline maths only when a non-space follows it, and
+closes it only after a non-space, so "$5 and $10" stays text; `\$` is a
+literal dollar. Maths is off by default, so a site that does not turn it on
+keeps every dollar sign as written. The renderer is the
+[KaTeX command-line tool](https://katex.org/docs/cli) with MathML output.
+KaTeX features outside [MathML Core](https://www.w3.org/TR/mathml-core/)
+(`\cancel`, bold or double-struck letters, aligned matrices) are refused
+rather than shown wrongly.
+
+`diagrams` lists the fenced diagram languages to render, at build time, to
+inline SVG: `d2` ([D2](https://d2lang.com/)) and `dot`
+([Graphviz](https://graphviz.org/doc/info/lang.html)):
+
+````markdown
+```d2
+draft -> post: publish
+```
+
+```dot
+digraph { post -> feed }
+```
+````
+
+With `diagrams` empty, such fences stay code blocks. With it set, a fence of
+a language it does not list is an error, since the site asked for diagrams
+to be drawn and left that language out. D2 imports (`@file`) are refused: a
+diagram is drawn from its fence alone. Rendered diagrams are cached by
+content under `build/isonim-blog/diagrams/`. Their colours are CSS custom
+properties a theme sets (see [Themes](themes.md#maths-and-diagrams)).
+
+An invalid formula or diagram fails the build, naming the file and the line
+of its opening delimiter or fence. KaTeX, D2 and Graphviz come with
+isonim-blog: the dev shell, the packaged CLI and the Nix builder inject them
+by path (`ISONIM_BLOG_KATEX`, `ISONIM_BLOG_D2`, `ISONIM_BLOG_DOT`); none is
+looked up on `PATH`, and a site that uses none of them needs none of them.
+
+Neither needs `'unsafe-inline'` (see below): MathML carries no styles, and a
+diagram's SVG has no `style` attribute. Its rules are in a `<style>` element
+inside the SVG, which the build allows by its hash, so a page with diagrams
+gets a policy rule of its own.
 
 ## Zero JavaScript by default
 

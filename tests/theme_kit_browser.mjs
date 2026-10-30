@@ -27,6 +27,21 @@
 //   (`securitypolicyviolation`, https://www.w3.org/TR/CSP3/#violation-events),
 //   so a theme that needs anything the policy does not allow fails.
 //
+// - on every page with build-time maths or diagrams, in both schemes and at
+//   both widths, the browser must really lay them out: every MathML
+//   `<math>` has a box, and every `<mfrac>` stacks its numerator above its
+//   denominator (MathML Core layout, https://www.w3.org/TR/mathml-core/#fractions-mfrac);
+//   every inline diagram SVG has a box, and every label in it is painted in
+//   a colour with at least 4.5:1 contrast (WCAG 2.2 SC 1.4.3) against the
+//   shape under it, or the page background. axe does not judge text inside
+//   SVG, and a diagram whose palette ignores the dark scheme loses its
+//   labels there. As axe does, only what the page shows is judged: a formula
+//   or diagram whose surrounding content the theme hides in the page's
+//   initial state (a collapsed details layer, say) is counted as hidden,
+//   while one hidden on its own, in shown content, is a problem. The counts
+//   are reported, so a fixture without maths or diagrams cannot pass
+//   vacuously.
+//
 // Requests to any other origin are refused, so the check never depends on
 // the network. axe is evaluated through the DevTools protocol after the page
 // has loaded, which the page's policy does not govern (an injected script
@@ -236,6 +251,129 @@ async function scrollers(page) {
   });
 }
 
+// Build-time maths and diagrams as the browser lays them out: counts, and a
+// problem for each formula or diagram that does not render or whose label
+// is unreadable.
+async function generated(page) {
+  return await page.evaluate(() => {
+    const problems = [];
+    const counts = {
+      present: 0,
+      hidden: 0,
+      maths: 0,
+      fractions: 0,
+      diagrams: 0,
+      labels: 0,
+    };
+    // Computed colours are `rgb(r, g, b)` or `rgba(r, g, b, a)`.
+    const parse = (value) => {
+      const m =
+        /^rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)$/.exec(
+          value,
+        );
+      return m
+        ? {
+            rgb: [m[1], m[2], m[3]].map(Number),
+            alpha: m[4] === undefined ? 1 : Number(m[4]),
+          }
+        : null;
+    };
+    // WCAG 2.2 relative luminance and contrast ratio
+    // (https://www.w3.org/TR/WCAG22/#dfn-relative-luminance).
+    const luminance = ({ rgb }) => {
+      const [r, g, b] = rgb.map((c) => {
+        const s = c / 255;
+        return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (a, b) => {
+      const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
+      return (x + 0.05) / (y + 0.05);
+    };
+    const shown = (el) => {
+      const box = el.getBoundingClientRect();
+      return box.width > 0 && box.height > 0;
+    };
+    // Whether the content around `el` is rendered at all: false inside a
+    // subtree the theme hides (display: none), where nothing is judged.
+    const inShownContent = (el) => el.parentElement.getClientRects().length > 0;
+    const page = parse(getComputedStyle(document.body).backgroundColor);
+    for (const math of document.querySelectorAll("math")) {
+      counts.present += 1;
+      if (!inShownContent(math)) {
+        counts.hidden += 1;
+        continue;
+      }
+      counts.maths += 1;
+      if (!shown(math))
+        problems.push(`a formula is not laid out: ${math.textContent.trim()}`);
+    }
+    for (const frac of document.querySelectorAll("math mfrac")) {
+      const math = frac.closest("math");
+      if (!inShownContent(math) || !shown(math)) continue;
+      counts.fractions += 1;
+      const [top, bottom] = [...frac.children].map((c) =>
+        c.getBoundingClientRect(),
+      );
+      if (!top || !bottom || top.bottom > bottom.top + 1)
+        problems.push(`a fraction is not stacked: ${frac.textContent.trim()}`);
+    }
+    for (const svg of document.querySelectorAll("svg.isonim-diagram")) {
+      counts.present += 1;
+      if (!inShownContent(svg)) {
+        counts.hidden += 1;
+        continue;
+      }
+      counts.diagrams += 1;
+      if (!shown(svg)) {
+        problems.push(`a diagram is not laid out: ${svg.id}`);
+        continue;
+      }
+      for (const text of svg.querySelectorAll("text")) {
+        const label = text.textContent.trim();
+        if (label === "") continue;
+        counts.labels += 1;
+        // Hit-testing sees only the viewport, so bring the label into it.
+        text.scrollIntoView({ block: "center", inline: "center" });
+        const box = text.getBoundingClientRect();
+        const ink = parse(getComputedStyle(text).fill);
+        if (box.width <= 0 || !ink || ink.alpha === 0) {
+          problems.push(`the diagram label "${label}" is not painted`);
+          continue;
+        }
+        // The topmost painted shape under the label's centre, else the page.
+        let under = page;
+        const x = box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        const stack = document.elementsFromPoint(x, y);
+        if (!stack.includes(text)) {
+          problems.push(
+            `the diagram label "${label}" is not on top where it is drawn`,
+          );
+          continue;
+        }
+        for (const el of stack) {
+          if (el === text || el.closest("text") || !svg.contains(el)) continue;
+          if (["svg", "g"].includes(el.tagName)) continue;
+          const fill = parse(getComputedStyle(el).fill);
+          if (fill && fill.alpha > 0) {
+            under = fill;
+            break;
+          }
+        }
+        const ratio = contrast(ink, under);
+        if (ratio < 4.5)
+          problems.push(
+            `the diagram label "${label}" has contrast ${ratio.toFixed(2)}:1 against what is under it (rgb(${under.rgb}) under rgb(${ink.rgb})), below 4.5:1`,
+          );
+      }
+    }
+    window.scrollTo(0, 0);
+    return { problems, counts };
+  });
+}
+
 async function main() {
   const input = readInput();
   const root = normalize(input.root);
@@ -247,6 +385,14 @@ async function main() {
     pages: input.pages.length,
     runs: 0,
     scrollers: {},
+    generated: {
+      present: 0,
+      hidden: 0,
+      maths: 0,
+      fractions: 0,
+      diagrams: 0,
+      labels: 0,
+    },
   };
   if (!existsSync(join(driverDir, "index.mjs")))
     throw new Error(`no playwright-core at ${driverDir}`);
@@ -313,6 +459,11 @@ async function main() {
               for (const name of await scrollers(page))
                 report.scrollers[name] = (report.scrollers[name] ?? 0) + 1;
           }
+          const content = await generated(page);
+          for (const [key, count] of Object.entries(content.counts))
+            report.generated[key] += count;
+          for (const problem of content.problems)
+            problems.push(`${path} (${scheme}, ${width}px): ${problem}`);
           const axe = await axeRun(page, axeSource);
           report.axe = axe.version;
           report.runs += 1;

@@ -40,6 +40,14 @@ type
     remoteImageOrigins*: seq[string]
       ## `[images] remote_origins`: the origins (`https://cdn.example.net`)
       ## pages may show images from; they are added to the CSP `img-src`.
+    math*: bool
+      ## `[markdown] math`: `$…$`, `$$…$$` and fenced `math` are rendered to
+      ## MathML at build time (KaTeX, injected by path). Off by default, so
+      ## a dollar sign in prose stays text unless a site opts in.
+    diagrams*: seq[string]
+      ## `[markdown] diagrams`: the fenced diagram languages rendered to
+      ## inline SVG at build time, a subset of `diagramLanguages`; empty by
+      ## default, which leaves such fences code blocks.
     skipExternal*: seq[string]
       ## `[check] skip_external`: the links `check --external` does not
       ## request, normalised by `parseSkipExternal`: URL prefixes
@@ -109,6 +117,9 @@ type
       ## 3339 date-time with an offset (a bare number is refused); empty
       ## selects the wall clock. See `inputs.parseBuildClock`.
     imageCache*: string  ## Optional directory where image variants are reused.
+    diagramCache*: string
+      ## Optional directory where rendered diagrams are reused; without one
+      ## a build caches them in a temporary directory of its own.
     incremental*: bool
       ## Update the output in place, writing only files whose bytes changed
       ## and removing files the build no longer produces (`serve`), instead
@@ -402,6 +413,24 @@ proc skipsExternal*(skip: openArray[string]; url: string): bool =
       return true
   false
 
+const diagramLanguages* = ["d2", "dot"]
+  ## The fence languages `[markdown] diagrams` may name: D2 and Graphviz.
+
+proc parseMarkdown(config: var SiteConfig) =
+  ## The typed keys of `[markdown]`: `math` and `diagrams`. Other keys
+  ## (`highlight_theme`, or a key a later version reads) stay in the table.
+  config.math = config.markdown.boolValue("math")
+  config.diagrams = @[]
+  if config.markdown.hasKey("diagrams"):
+    let value = config.markdown["diagrams"]
+    if value.kind != JArray:
+      fail("markdown.diagrams must be a list of diagram languages, as in diagrams = [\"d2\", \"dot\"]")
+    for item in value:
+      if item.kind != JString or item.getStr notin diagramLanguages:
+        fail("markdown.diagrams may name only " & diagramLanguages.join(" and ") & ", not " &
+          (if item.kind == JString: item.getStr else: $item))
+      if item.getStr notin config.diagrams: config.diagrams.add item.getStr
+
 proc parseCheck(config: var SiteConfig; check: JsonNode) =
   ## `[check]`: settings of `isonim-blog check`. Its only key is
   ## `skip_external`; another key is an error, because a misspelt key would
@@ -438,6 +467,7 @@ proc parseConfig*(node: JsonNode): SiteConfig =
   result.feeds = node.objectValue("feeds")
   result.taxonomies = node.objectValue("taxonomies")
   result.markdown = node.objectValue("markdown")
+  parseMarkdown(result)
   result.images = node.objectValue("images")
   parseImages(result)
   parseCheck(result, node.objectValue("check"))

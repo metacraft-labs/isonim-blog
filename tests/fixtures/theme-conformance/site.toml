@@ -3,6 +3,7 @@
 # test. The kit adds `theme = "<path>"` above these lines. It produces every
 # page kind: posts (one a bundle with a hero image), a draft, pages, a
 # collection entry, two index pages, tag, category, year and month pages.
+# Maths and diagrams are on, so a theme is judged on how it shows them.
 title = "Conformance Notebook"
 description = "Generic content exercising every feature a theme styles"
 url = "https://example.org"
@@ -13,6 +14,10 @@ author = { name = "Example Author", url = "/about/" }
 
 [archives]
 month = "/:year/:month/"
+
+[markdown]
+math = true
+diagrams = ["d2", "dot"]
 
 [collections.notes]
 output = true

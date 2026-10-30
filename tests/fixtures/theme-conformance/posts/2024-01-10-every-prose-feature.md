@@ -66,9 +66,30 @@ echo greet("world")
 
 A wide table must fit a narrow screen too:
 
-| Release | Date       | Platforms                      | Highlights                                  | Download                                  |
-| ------- | ---------- | ------------------------------ | ------------------------------------------- | ----------------------------------------- |
-| 1.0     | 2024-01-10 | Linux, macOS, Windows, FreeBSD | The first stable release with every feature | https://example.com/releases/1.0/download |
+| Release | Date       | Platforms                      | Highlights                                  | Archive                                      |
+| ------- | ---------- | ------------------------------ | ------------------------------------------- | -------------------------------------------- |
+| 1.0     | 2024-01-10 | Linux, macOS, Windows, FreeBSD | The first stable release with every feature | releases/1.0/example-1.0-x86_64-linux.tar.gz |
+
+## Maths and diagrams
+
+Inline maths, such as $e^{i\pi} + 1 = 0$, sits in the line of text. A
+display formula stands on its own:
+
+$$
+\sum_{k=1}^{n} k = \frac{n(n+1)}{2}
+$$
+
+A diagram in D2:
+
+```d2
+draft -> post: publish
+```
+
+And one in Graphviz:
+
+```dot
+digraph { rankdir=LR; post -> feed }
+```
 
 ## Asides
 

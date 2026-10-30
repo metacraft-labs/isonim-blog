@@ -54,6 +54,37 @@ stylesheet wraps the lines of every code block inside it. Wide tables keep
 scrolling. Any other value than `true` or `false` fails the build. When
 printed, code lines and table cells always wrap.
 
+## Maths and diagrams
+
+Maths arrives as MathML (`<math>`, with `display="block"` for display
+formulas), which the browser lays out with its own maths fonts; a theme may
+give block formulas spacing. Diagrams arrive as inline
+`<svg class="isonim-diagram">`. Their colours are four CSS custom properties
+the theme sets on that element or an ancestor:
+
+| Property               | Paints                         | Fallback       |
+| ---------------------- | ------------------------------ | -------------- |
+| `--diagram-background` | the diagram's background       | `Canvas`       |
+| `--diagram-fill`       | the shapes                     | `Canvas`       |
+| `--diagram-foreground` | labels                         | `currentColor` |
+| `--diagram-stroke`     | outlines, edges and arrowheads | `currentColor` |
+
+The fallbacks are the browser's system colours, which follow `color-scheme`,
+not a theme's own dark palette, so a theme with a dark scheme binds the four
+to its tokens. The minimal theme does:
+
+```css
+.prose svg.isonim-diagram {
+  --diagram-background: var(--sys-color-surface);
+  --diagram-fill: var(--sys-color-surface-raised);
+  --diagram-foreground: var(--sys-color-text);
+  --diagram-stroke: var(--sys-color-text-muted);
+}
+```
+
+The conformance kit's fixture has formulas and a D2 and a Graphviz diagram,
+and the kit checks that each label reads at 4.5:1 in both schemes.
+
 ## Naming a theme in `site.toml`
 
 ```toml
@@ -240,6 +271,10 @@ content feature, with no layouts of its own) with the theme and checks that:
   counts the boxes that scroll sideways inside the pages at 360 pixels
   (`pre 2, div.table-scroll 2` for the minimal theme), so you can see
   whether the theme scrolls or wraps wide content;
+- in Chromium, the fixture's formulas are laid out (a fraction's numerator
+  above its denominator) and every diagram label has at least 4.5:1
+  contrast against the shape under it, in both schemes (axe does not judge
+  text inside SVG); the summary counts the formulas and diagram labels seen;
 - in Chromium, every page is served with the headers of the built
   `_headers`, so the generated Content-Security-Policy is enforced, and the
   browser reports no violation of it. A theme's CSS must therefore stay in

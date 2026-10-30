@@ -13,14 +13,17 @@
 ##    time so the result never depends on the clock or the shell;
 ## 4. every page kind was produced (the vacuity guard: a fixture that lost a
 ##    page kind would otherwise make the later checks pass vacuously);
-## 5. the directives `theme.toml` declares are exactly the ones its
+## 5. the fixture's maths and diagrams were rendered at build time (MathML
+##    with a fraction, and D2 and Graphviz SVG with labels), so the browser
+##    check below has them to judge;
+## 6. the directives `theme.toml` declares are exactly the ones its
 ##    `includes/directives.nim` registers;
-## 6. zero JavaScript: no page carries a script other than JSON-LD or an
+## 7. zero JavaScript: no page carries a script other than JSON-LD or an
 ##    inline event handler, and the output holds no `.js` file;
-## 7. every page links the theme's stylesheets, and they exist;
-## 8. `isonim-blog check` finds nothing wrong in the production build
+## 8. every page links the theme's stylesheets, and they exist;
+## 9. `isonim-blog check` finds nothing wrong in the production build
 ##    (links and anchors written by the layouts, alt text, feeds);
-## 9. in Chromium, with axe-core: no WCAG 2.0/2.1/2.2 A or AA violation on
+## 10. in Chromium, with axe-core: no WCAG 2.0/2.1/2.2 A or AA violation on
 ##    any page, in the light and the dark scheme, at 360 and 1280 pixels
 ##    wide; and no horizontal scroll at 360 pixels. The summary names the
 ##    boxes that scroll sideways inside the pages at 360 pixels (code
@@ -28,7 +31,10 @@
 ##    content is visible; axe requires every such box to be focusable. Every
 ##    page is served with the built `_headers` (as Cloudflare Pages applies
 ##    it), so the generated Content-Security-Policy is enforced, and any
-##    violation the browser reports is a failure.
+##    violation the browser reports is a failure. Every formula must be
+##    laid out (fractions stacked) and every diagram label readable (4.5:1
+##    against the shape under it) in both schemes; axe does not judge SVG
+##    text.
 ##
 ## The browser checks run `theme_kit_browser.mjs` with the dev shell's pinned
 ## Playwright Chromium and axe-core. Nothing is mocked: the fixture is built
@@ -68,6 +74,8 @@ const
     ("year archive", "2024/index.html"),
     ("month archive", "2024/01/index.html")]
     ## One page of every kind the fixture must produce.
+  generatedPage* = "posts/every-prose-feature/index.html"
+    ## The fixture page with build-time maths and diagrams.
   layoutRoles = [("post", "posts"), ("page", "pages and collection entries"),
     ("index", "the paginated post index"), ("tag", "tag pages"),
     ("category", "category pages"), ("archive", "year and month archives")]
@@ -127,6 +135,29 @@ proc scrollerSummary*(scrollers: JsonNode): string =
   entries.sort()
   "boxes scrolling sideways at 360px: " & (if entries.len == 0: "none" else: entries.join(", "))
 
+proc generatedProblems*(html: string): seq[string] =
+  ## What the fixture's maths and diagrams page lacks: MathML with a
+  ## fraction, a D2 and a Graphviz diagram (inline SVG) with labels, and no
+  ## Markdown left unrendered. The browser check judges them only if they
+  ## are there.
+  if "<math " notin html or "<mfrac>" notin html: result.add "no MathML formula with a fraction"
+  if "$$" in html or "language-math" in html: result.add "maths left as Markdown"
+  if html.count("class=\"d2-") == 0 or html.count("class=\"isonim-diagram\"") < 2:
+    result.add "no D2 and Graphviz diagrams (inline SVG)"
+  if "language-d2" in html or "language-dot" in html: result.add "a diagram left as a code block"
+  if "<text" notin html: result.add "no diagram labels"
+
+proc generatedSummary*(counts: JsonNode): string =
+  ## `maths and diagrams laid out: 12 formulas (4 fractions), 8 diagrams
+  ## (40 labels); 0 hidden with their content`, summed over every page,
+  ## width and scheme. Hidden ones sit in content the theme does not show
+  ## in the page's initial state, and are not judged.
+  proc count(key: string): int =
+    if counts.isNil or counts.kind != JObject: 0 else: counts{key}.getInt(0)
+  "maths and diagrams laid out: " & $count("maths") & " formulas (" & $count("fractions") &
+    " fractions), " & $count("diagrams") & " diagrams (" & $count("labels") & " labels); " &
+    $count("hidden") & " hidden with their content"
+
 proc browserChecks*(output: string; pages: seq[string]): tuple[problems: seq[string], summary: string] =
   ## Run the browser driver: every problem it reports (or why it could not
   ## run), and what it checked.
@@ -149,13 +180,17 @@ proc browserChecks*(output: string; pages: seq[string]): tuple[problems: seq[str
       return (@["the browser driver produced no report (exit " & $code & "):"] & transcript.strip().splitLines(), "")
     let report = parseJson(transcript[start .. ^1])["report"]
     for problem in report["problems"]: result.problems.add problem.getStr
+    # Vacuity guard: the fixture's maths and diagrams reached the browser.
+    let counts = report{"generated"}
+    if report.hasKey("runs") and (counts.isNil or counts{"present"}.getInt(0) == 0):
+      result.problems.add "the browser saw no formula or diagram (" & generatedSummary(counts) & ")"
     if code != 0 and result.problems.len == 0:
       result.problems.add "the browser driver exited " & $code & " without naming a problem"
     if report.hasKey("runs"):
       result.summary = $report["runs"].getInt & " axe runs over " & $pages.len & " pages, each under " &
         "the generated Content-Security-Policy (axe-core " &
         report{"axe"}.getStr("?") & ", Chromium " & report{"browser"}.getStr("?") & "); " &
-        scrollerSummary(report{"scrollers"})
+        scrollerSummary(report{"scrollers"}) & "\n" & generatedSummary(report{"generated"})
   finally: process.close()
 
 proc runThemeKit*(theme: string; work: string; browser = true): KitReport =
@@ -192,6 +227,10 @@ proc runThemeKit*(theme: string; work: string; browser = true): KitReport =
   for (kind, path) in expectedPages:
     if not fileExists(output / path): absent.add "no " & kind & " at " & path
   result.add "every page kind is built", absent
+  let generated =
+    if fileExists(output / generatedPage): generatedProblems(readFile(output / generatedPage))
+    else: @["no " & generatedPage]
+  result.add "maths and diagrams are rendered at build time", generated
   # Directives: declared in theme.toml exactly when registered.
   var registered: seq[string]
   try:
@@ -233,7 +272,7 @@ proc runThemeKit*(theme: string; work: string; browser = true): KitReport =
     let (problems, summary) = browserChecks(output, pages)
     result.add "WCAG 2.2 AA (axe-core) in both schemes; no horizontal scroll at 360px; " &
       "no Content-Security-Policy violation",
-      (if problems.len > 0: problems else: @[summary]), passed = problems.len == 0
+      (if problems.len > 0: problems else: summary.splitLines()), passed = problems.len == 0
 
 when isMainModule:
   let args = commandLineParams()

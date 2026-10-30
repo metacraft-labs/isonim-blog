@@ -53,6 +53,7 @@ suite "theme conformance kit":
     check report.passed
     check report.checks.mapIt(it.name) == @["theme.toml and tokens", "required layouts",
       "the fixture builds with the theme", "every page kind is built",
+      "maths and diagrams are rendered at build time",
       "declared directives are registered", "zero JavaScript",
       "every page links the theme's stylesheets",
       "isonim-blog check (links, anchors, alt text, feeds)"]

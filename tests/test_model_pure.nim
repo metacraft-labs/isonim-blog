@@ -30,6 +30,25 @@ suite "site model":
     expect BlogError: discard parseConfig(%*{"title": 7})
     expect BlogError: discard parseConfig(%*{"title": "N", "url": "https://example.org/path"})
 
+  test "[markdown] math and diagrams are typed, off by default, and validated":
+    let plain = parseConfig(%*{"title": "N"})
+    check not plain.math
+    check plain.diagrams.len == 0
+    let on = parseConfig(%*{"title": "N", "markdown": {"math": true,
+      "diagrams": ["dot", "d2", "dot"], "highlight_theme": "theme"}})
+    check on.math
+    check on.diagrams == @["dot", "d2"]
+    # Keys this version does not type stay in the table for layouts.
+    check on.markdown["highlight_theme"].getStr == "theme"
+    for (markdown, message) in [
+        (%*{"math": "yes"}, "math must be a boolean"),
+        (%*{"diagrams": "d2"}, "markdown.diagrams must be a list of diagram languages"),
+        (%*{"diagrams": ["mermaid"]}, "markdown.diagrams may name only d2 and dot, not mermaid"),
+        (%*{"diagrams": [1]}, "markdown.diagrams may name only d2 and dot, not 1")]:
+      var failure = ""
+      try: discard parseConfig(%*{"title": "N", "markdown": markdown})
+      except BlogError as cause: failure = cause.msg
+      check failure.startsWith(message)
   test "dates validate calendars and metadata overrides names":
     let page = pageFromSource("posts/2020-01-02-old.md",
       "---\ndate: 2024-02-29\nslug: new\ntitle: A title\ncustom: [a, b]\n---\nBody", "posts", "/:year/:month/:day/:slug/")

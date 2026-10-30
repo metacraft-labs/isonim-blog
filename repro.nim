@@ -51,7 +51,7 @@ package isonim_blog:
     for name in ["test_model_pure", "test_site_model", "test_zero_js_default", "test_cli_build",
         "test_taxonomies", "test_feeds", "test_base_path", "test_static_images", "test_static_ogimage",
         "test_check", "test_serve_reload", "test_cli_scaffold", "test_deploy_recipe",
-        "test_theme_format", "test_theme_override", "test_theme_kit"]:
+        "test_theme_format", "test_theme_override", "test_theme_kit", "test_math_diagrams"]:
       let compiled = buildNimUnittest.build(
         source = "tests/" & name & ".nim", binary = "build/tests/" & name,
         nimcache = "build/nimcache/" & name, warningsOff = false,
