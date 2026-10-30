@@ -166,7 +166,9 @@ suite "build command":
     check readFile(published[0]) == readFile(bundle)
     let name = "/" & relativePath(published[0], root / "public")
     check readFile(root / "public/index.html").contains("<script src=\"" & name & "\" defer>")
-    check readFile(root / "public/_headers").contains("script-src " & name)
+    # A source expression needs a host, so the bundle on the site is 'self'.
+    check readFile(root / "public/_headers").contains("script-src 'self';")
+    check not readFile(root / "public/_headers").contains(name)
     let key = readFile(bundle & ".key")
     let second = build()
     check second.output.startsWith("Reused the compiled site program")

@@ -96,6 +96,9 @@ max_source_bytes = 2_000_000          # a larger image is an error
 quality = { avif = 50, webp = 75 }    # variant encoder quality, 1 to 100
 remote_origins = []                   # origins pages may show images from
 
+[check]
+skip_external = []                    # links `check --external` does not request
+
 [output]
 scripts = "none"                      # "none" (default) or "islands"
 analytics = { provider = "none" }     # "none", "custom" (snippet = "...") or "beacon" (src = "...")
@@ -116,18 +119,32 @@ a `$toml` key is wrapped as `{"$toml": "table", "value": {...}}`.
 
 Front matter is a YAML subset between `---` lines.
 
-| Key                                                                   | Meaning                                                                                     |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `title`, `description`                                                | Title and meta description; a missing description, or one over 160 characters, is a warning |
-| `date`, `updated`                                                     | `YYYY-MM-DD`; override the file-name date; `updated` becomes the sitemap `lastmod`          |
-| `slug`, `permalink`                                                   | Override the URL                                                                            |
-| `layout`                                                              | Layout name (default `post` for posts, `page` otherwise)                                    |
-| `tags`, `categories`                                                  | Lists; when `data/tags.toml` exists, every tag must be declared there                       |
-| `draft`                                                               | `true` keeps a file under `posts/` out of builds without `--drafts`                         |
-| `image`, `image_alt`                                                  | Hero image; `image_alt` is required with it (`image_alt: ""` for a decorative image)        |
-| `series`, `series_order`                                              | Series navigation: posts sharing `series`, read in `series_order`, then date and slug       |
-| `og_image`, `excerpt`, `toc`, `noindex`, `canonical`, `redirect_from` | Further page settings                                                                       |
-| anything else                                                         | Kept unchanged in `page.extra`                                                              |
+| Key                                                                   | Meaning                                                                               |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `title`, `description`                                                | Title and meta description (see [Descriptions](#descriptions))                        |
+| `date`, `updated`                                                     | `YYYY-MM-DD`; override the file-name date; `updated` becomes the sitemap `lastmod`    |
+| `slug`, `permalink`                                                   | Override the URL                                                                      |
+| `layout`                                                              | Layout name (default `post` for posts, `page` otherwise)                              |
+| `tags`, `categories`                                                  | Lists; when `data/tags.toml` exists, every tag must be declared there                 |
+| `draft`                                                               | `true` keeps a file under `posts/` out of builds without `--drafts`                   |
+| `image`, `image_alt`                                                  | Hero image; `image_alt` is required with it (`image_alt: ""` for a decorative image)  |
+| `series`, `series_order`                                              | Series navigation: posts sharing `series`, read in `series_order`, then date and slug |
+| `og_image`, `excerpt`, `toc`, `noindex`, `canonical`, `redirect_from` | Further page settings                                                                 |
+| anything else                                                         | Kept unchanged in `page.extra`                                                        |
+
+### Descriptions
+
+A page's `description` is its `<meta name="description">`, its OpenGraph and
+Twitter description and its JSON-LD `description`. A page without one gets
+its excerpt there instead (the text before `<!--more-->`, otherwise the first
+paragraph, or the `excerpt` front matter key), with the markup removed and
+cut at a word boundary to at most 160 characters; a page with no excerpt
+either gets the site's `description`. This is the fallback of jekyll-seo-tag
+and Hugo. The build warns about each page that uses a fallback, naming it,
+and about a description longer than 160 characters (search results show
+about that much, measured in pixels rather than characters, so this is a
+guide, not a limit). Layouts still see the page's own `description`, empty
+when it has none.
 
 ## Permalinks
 
@@ -376,12 +393,45 @@ inputs give the same bytes; `isonim-blog build` keeps encoded variants under
 With `scripts = "none"`, a built page contains no `<script>` element other
 than `application/ld+json` and the configured analytics snippet. A layout
 that emits any other script element, including an inert data block, fails the
-build. The generated `_headers` carries a Content-Security-Policy whose
-`script-src` names only the scripts the pages load and whose `img-src`
-adds the origins in `[images] remote_origins`. Both are
-site-wide, so this is one rule for every path (`/*`), which keeps even a large
-site far below Cloudflare Pages' limit of 100 header rules; a site's own
-`static/_headers` is kept and the generated rules are appended to it.
+build.
+
+The generated `_headers` carries a Content-Security-Policy that starts from
+`default-src 'none'` and allows only what the pages load:
+
+```text
+default-src 'none'; script-src 'none'; style-src 'self'; img-src 'self' data:;
+font-src 'self'; media-src 'self'; manifest-src 'self'; base-uri 'self';
+form-action 'self'; frame-ancestors 'none'
+```
+
+(on one line in the file). `script-src` is `'none'` without scripts; with
+islands or analytics it is `'self'` for a script on the site, the URL of a
+script elsewhere and the hash of an inline analytics snippet, and
+`connect-src 'self'` is added. `img-src` adds the origins in
+`[images] remote_origins`. `frame-ancestors 'none'` keeps other sites from
+framing the pages, and `form-action 'self'` keeps forms on the site.
+
+There is no `'unsafe-inline'`. Stylesheets under `assets/` are allowed by
+`'self'`. A `<style>` element a layout emits is allowed by the SHA-256 hash of
+its text, which the build adds to `style-src` for the pages that carry it
+(`style-src 'self' 'sha256-…'`), as Astro does for its inline styles. A
+`style` attribute (in an inline SVG too) fails the build naming the page and
+the element: a hash can allow one only with `'unsafe-hashes'`, so the browser
+would otherwise ignore it. Move such rules into a stylesheet or a `<style>`
+element. A `<style>` element inside an inline SVG must not contain `&` or
+`<`, since its hash could not be computed from the text there. An island may
+still set styles from its script through `element.style`, which the policy
+does not restrict. A stylesheet that loads a font, image or stylesheet from
+another origin is blocked by the browser; `just test-theme` reports it for a
+theme.
+
+When every page has the same policy, it is one rule for every path (`/*`),
+which keeps even a large site far below Cloudflare Pages' limit of 100 header
+rules. Layouts that emit different `<style>` elements on different pages
+give each page its own rule, and the build warns above 100. A site's own
+`static/_headers` is kept and the generated rules are appended to it. Some directives, `frame-ancestors` among them, work only in a header, so
+a host other than Cloudflare Pages or Netlify needs the same policy set as a
+response header.
 
 With `scripts = "islands"`, a layout may declare interactive islands:
 

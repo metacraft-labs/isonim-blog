@@ -110,8 +110,11 @@ Builds the site as production does (no drafts, no future posts) into
   OpenGraph URL that stays on the site must name a built file, and every
   `#fragment` must name an element `id` on the target page. Links written by
   layouts are checked as well as links in Markdown.
-- **Front matter.** A missing description, or one longer than 160 characters,
-  which `build` only warns about, is an error here.
+- **Front matter.** A missing description, for which the meta description
+  falls back to the excerpt or the site's description, and one longer than
+  160 characters are warnings, as in `build`
+  (see [Descriptions](building-a-site.md#descriptions)). A new post's empty
+  `description` therefore passes `check`.
 - **Alt text.** Every image has an `alt` attribute: alt text, or `alt=""`
   for a decorative image. A missing attribute, or alt text of only spaces, is
   an error.
@@ -122,6 +125,20 @@ Builds the site as production does (no drafts, no future posts) into
 
 `--external` also requests every link to another site and reports those that
 fail or answer with an HTTP status of 400 or more. It needs network access.
+Some sites refuse or rate-limit automated requests; list them in `site.toml`
+so that `check` does not request them:
+
+```toml
+[check]
+skip_external = ["twitter.com", "https://www.linkedin.com/in/"]
+```
+
+An entry is either a host name, which also covers its subdomains
+(`twitter.com` covers `mobile.twitter.com`), or an `http://` or `https://`
+URL prefix (scheme and host compared without case, the path as written).
+Anything else, and any other key in `[check]`, fails the check, so a typo
+cannot silently request a site again. Each skipped link is listed as
+`info: <url>: external link not requested`.
 
 `check` prints one line per finding and a summary, and exits with status 1
 when it found an error.

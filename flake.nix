@@ -383,7 +383,8 @@
               mkdir "$out"
             '';
           # A declared island becomes exactly one hashed bundle, loaded by the
-          # page and named by its CSP, compiled with `nim js` in the sandbox.
+          # page and allowed by its CSP as 'self' (a path alone is not a CSP
+          # source), compiled with `nim js` in the sandbox.
           checks.build-site-islands =
             let
               site = self.lib.${system}.buildSite {
@@ -400,7 +401,8 @@
               test "$(find ${site} -name '*.js' | wc -l)" = 1
               name="''${bundles[0]#${site}}"
               grep -qF "<script src=\"$name\" defer>" ${site}/index.html
-              grep -qF "script-src $name" ${site}/_headers
+              grep -qF "; script-src 'self'; style-src 'self';" ${site}/_headers
+              if grep -qF "$name" ${site}/_headers; then exit 1; fi
               grep -q 'data-hk="counter-1"' ${site}/index.html
               node --check "''${bundles[0]}"
               mkdir "$out"

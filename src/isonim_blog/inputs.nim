@@ -1,6 +1,7 @@
 ## Native input boundary. Only named input directories are traversed. Symlinks
 ## are refused instead of following paths outside a site's declared inputs.
 import std/[os, osproc, streams, strutils, algorithm, json, times, tables, strtabs]
+from std/unicode import runeLen
 import ./[model, archives, theme_format]
 export theme_format
 import isonim/static/buildinfo
@@ -418,8 +419,12 @@ proc loadSite*(root: string; options = BuildOptions()): Site =
         if not options.future: continue
         page.future = true
       page.url = cleanRoute(result.config.basePath & page.url)
-      if page.description.len == 0 or page.description.len > 160:
-        result.warnings.add rel & ": description is missing or exceeds 160 characters"
+      # A missing description is reported by the build, which knows what
+      # the meta description falls back to (the excerpt or the site's).
+      let length = page.description.runeLen
+      if length > maxDescriptionRunes:
+        result.warnings.add rel & ": description is " & $length & " characters long; search " &
+          "results usually show about " & $maxDescriptionRunes & ", so the rest may be cut off"
       pages.add page
     except CatchableError as cause: fail(rel & ": " & cause.msg)
   pages.sortPages()

@@ -40,6 +40,11 @@ type
     remoteImageOrigins*: seq[string]
       ## `[images] remote_origins`: the origins (`https://cdn.example.net`)
       ## pages may show images from; they are added to the CSP `img-src`.
+    skipExternal*: seq[string]
+      ## `[check] skip_external`: the links `check --external` does not
+      ## request, normalised by `parseSkipExternal`: URL prefixes
+      ## (`https://example.com/members/`) and host names (`example.com`,
+      ## which also covers its subdomains).
   PageKind* = enum
     ## What produced a page: a content file, or one of the generated listings.
     pkContent, pkIndex, pkTag, pkCategory, pkYear, pkMonth
@@ -122,6 +127,11 @@ type
     islands*: seq[Island]
 
 const
+  maxDescriptionRunes* = 160
+    ## The description length the build warns above, in characters (Unicode
+    ## code points). Search engines cut a snippet by pixel width, not by
+    ## characters, so this is a heuristic and only a warning. A description
+    ## taken from the excerpt is cut to this length.
   defaultIndexPermalink* = "/"
     ## The post index when `[archives] index` is not set: the home page, as
     ## blog-first generators (Jekyll, Hexo, Pelican) place it.
@@ -338,6 +348,73 @@ proc parseImages(config: var SiteConfig) =
         except ValueError as cause: fail("images.remote_origins: " & cause.msg)
       if origin notin config.remoteImageOrigins: config.remoteImageOrigins.add origin
 
+proc lowerSchemeAndAuthority(url: string): string =
+  ## `url` with everything before the path (scheme and authority) in lower
+  ## case: those parts compare without case (RFC 3986 section 6.2.2.1), the
+  ## rest as written.
+  let marker = url.find("://")
+  if marker < 0: return url
+  let pathStart = url.find('/', marker + 3)
+  if pathStart < 0: url.toLowerAscii
+  else: url[0 ..< pathStart].toLowerAscii & url[pathStart .. ^1]
+
+proc parseSkipExternal*(value: string): string =
+  ## One `[check] skip_external` entry, normalised. It is either an `http(s)`
+  ## URL prefix, with its scheme and host lower-cased
+  ## (`https://Example.com/a` becomes `https://example.com/a`), as Zola's
+  ## `[link_checker] skip_prefixes`
+  ## (https://www.getzola.org/documentation/getting-started/configuration/),
+  ## or a bare host name, lower-cased, which also covers its subdomains
+  ## (`example.com` covers `www.example.com`). Anything else is a
+  ## `BlogError`: an empty entry, another scheme, user information, a
+  ## fragment, whitespace, or a host with a port or path but no scheme. A
+  ## typo then fails the build instead of silently requesting the site.
+  let entry = value.strip()
+  if entry.len == 0: fail("check.skip_external: an entry is empty")
+  if "://" in entry:
+    let parsed = parseUri(entry)
+    if parsed.scheme.toLowerAscii notin ["http", "https"] or parsed.hostname.len == 0 or
+        parsed.username.len > 0 or parsed.password.len > 0 or
+        entry.contains({'\0'..' ', '#', '\x7f'}):
+      fail("check.skip_external: " & value & " is not an http(s) URL prefix, as in " &
+        "\"https://example.com/members/\"")
+    return lowerSchemeAndAuthority(entry)
+  let host = entry.toLowerAscii
+  for label in host.split('.'):
+    if label.len == 0 or label.len > 63 or label[0] == '-' or label[^1] == '-' or
+        not label.allCharsInSet({'a'..'z', '0'..'9', '-'}):
+      fail("check.skip_external: " & value & " is neither a host name (\"example.com\", " &
+        "no scheme, port or path) nor an http(s) URL prefix (\"https://example.com/members/\")")
+  host
+
+proc skipsExternal*(skip: openArray[string]; url: string): bool =
+  ## Whether `check --external` leaves `url` unrequested: it starts with a
+  ## URL prefix of `skip` (scheme and host compared without case), or its
+  ## host is a host name of `skip` or a subdomain of one. `skip` holds
+  ## entries normalised by `parseSkipExternal`.
+  if skip.len == 0: return false
+  let host = parseUri(url).hostname.toLowerAscii.strip(leading = false, chars = {'.'})
+  let normalised = lowerSchemeAndAuthority(url)
+  for entry in skip:
+    if "://" in entry:
+      if normalised.startsWith(entry): return true
+    elif host.len > 0 and (host == entry or host.endsWith("." & entry)):
+      return true
+  false
+
+proc parseCheck(config: var SiteConfig; check: JsonNode) =
+  ## `[check]`: settings of `isonim-blog check`. Its only key is
+  ## `skip_external`; another key is an error, because a misspelt key would
+  ## otherwise be ignored and every skipped site requested again.
+  config.skipExternal = @[]
+  for key, value in check:
+    if key != "skip_external": fail("check: unknown key " & key & " (the known key is skip_external)")
+    if value.kind != JArray: fail("check.skip_external must be a list of host names and URL prefixes")
+    for item in value:
+      if item.kind != JString: fail("check.skip_external must be a list of host names and URL prefixes")
+      let entry = parseSkipExternal(item.getStr)
+      if entry notin config.skipExternal: config.skipExternal.add entry
+
 proc parseConfig*(node: JsonNode): SiteConfig =
   ## Map decoded TOML without throwing away unknown top-level values.
   if node.kind != JObject: fail("site.toml must be a table")
@@ -363,6 +440,7 @@ proc parseConfig*(node: JsonNode): SiteConfig =
   result.markdown = node.objectValue("markdown")
   result.images = node.objectValue("images")
   parseImages(result)
+  parseCheck(result, node.objectValue("check"))
   let output = node.objectValue("output")
   result.output = output
   result.analytics = output.objectValue("analytics")
@@ -406,7 +484,7 @@ proc parseConfig*(node: JsonNode): SiteConfig =
   for key, value in node:
     if key notin ["title", "description", "url", "base_path", "language", "theme",
         "permalink", "timezone", "author", "feeds", "taxonomies", "collections",
-        "archives", "markdown", "images", "output", "paginate"]:
+        "archives", "markdown", "images", "output", "paginate", "check"]:
       result.extra[key] = value.copy
 
 proc validDate*(value: string): string =

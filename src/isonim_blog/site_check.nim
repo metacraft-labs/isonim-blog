@@ -1,8 +1,11 @@
 ## `isonim-blog check`: build the site the way production does and verify
 ## the result.
 ##
-## * Front matter: every problem `build` only warns about (a missing or long
-##   description) is an error here; invalid front matter fails the build.
+## * Front matter: what `build` warns about (a description that is missing,
+##   so that the meta description falls back to the excerpt or the site's, or
+##   that is longer than search results show) is a warning here too, as in
+##   jekyll-seo-tag and Hugo, which fall back silently; invalid front matter
+##   fails the build.
 ## * Internal links and anchors: every `href`, `src`, `srcset`, `poster` and
 ##   `og:image`/`og:url`/`twitter:image` reference of every built page that
 ##   stays on the site must name a built file, and a `#fragment` must name an
@@ -17,7 +20,9 @@
 ## * Feeds: every RSS 2.0 and Atom feed the pages link is well-formed XML
 ##   with the required elements, absolute links and valid dates.
 ## * With `--external`, every `http(s)` link to another origin is requested
-##   (curl, injected as ISONIM_BLOG_CURL) and must answer below 400.
+##   (curl, injected as ISONIM_BLOG_CURL) and must answer below 400, except
+##   those `[check] skip_external` names (sites that refuse or rate-limit
+##   automated requests), which are listed as skipped.
 ##
 ## HTML is tokenized by Python's standard `html.parser` (the pinned Python
 ## the build already uses), which decodes attribute values exactly as HTML
@@ -411,7 +416,7 @@ proc checkSite*(root: string; options = CheckOptions()): CheckReport =
     return
   for warning in site.warnings:
     let colon = warning.find(':')
-    result.add(svError, warning[0 ..< max(colon, 0)], "front matter: " & warning[colon + 1 .. ^1].strip())
+    result.add(svWarning, warning[0 ..< max(colon, 0)], "front matter: " & warning[colon + 1 .. ^1].strip())
   let output = root / "build" / "isonim-blog" / "check"
   var log: string
   try: log = buildSite(root, BuildOptions(outDir: output))
@@ -420,12 +425,21 @@ proc checkSite*(root: string; options = CheckOptions()): CheckReport =
     return
   for line in log.splitLines():
     if line.startsWith("warning: ") and line[9..^1] notin site.warnings:
-      result.add(svWarning, "build", line[9..^1])
+      # A warning about one source file ("posts/x.md: ...") is located there.
+      let message = line[9..^1]
+      let colon = message.find(": ")
+      if colon > 0 and fileExists(root / message[0 ..< colon]):
+        result.add(svWarning, message[0 ..< colon], message[colon + 2 .. ^1])
+      else:
+        result.add(svWarning, "build", message)
   var externalUrls: seq[string]
   # The output root is the base path's root, so the site's URLs map to
   # files once origin and base path are taken off.
   checkOutput(output, site.config.url & site.config.basePath, site.config.analytics, result, externalUrls)
   if options.external:
     for url in externalUrls:
+      if skipsExternal(site.config.skipExternal, url):
+        result.add(svInfo, url, "external link not requested (check.skip_external)")
+        continue
       let problem = externalStatus(url)
       if problem.len > 0: result.add(svError, url, "external link: " & problem)

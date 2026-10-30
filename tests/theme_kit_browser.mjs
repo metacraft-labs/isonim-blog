@@ -20,9 +20,18 @@
 //   WCAG 2.0, 2.1 and 2.2 level A and AA rules. Colour contrast is among
 //   them, so both schemes are checked against SC 1.4.3 and 1.4.11.
 //
+// - every page is served with the response headers of the built site's
+//   `_headers` file, applied as Cloudflare Pages applies them, so the
+//   generated Content-Security-Policy is enforced; a page served without
+//   one is a problem, and so is every violation the browser reports
+//   (`securitypolicyviolation`, https://www.w3.org/TR/CSP3/#violation-events),
+//   so a theme that needs anything the policy does not allow fails.
+//
 // Requests to any other origin are refused, so the check never depends on
-// the network. axe is injected after the page has loaded; the theme's own
-// pages carry no script (the kit checks that separately).
+// the network. axe is evaluated through the DevTools protocol after the page
+// has loaded, which the page's policy does not govern (an injected script
+// element would be blocked by `script-src 'none'`); the theme's own pages
+// carry no script (the kit checks that separately).
 //
 // Writes one line of JSON, {"report": {"problems": [...], ...}}, last.
 // Exit status 1 when a problem was found.
@@ -71,7 +80,66 @@ function fileFor(root, urlPath) {
   return full;
 }
 
+// The rules of a Cloudflare Pages `_headers` file
+// (https://developers.cloudflare.com/pages/configuration/headers/): a line
+// that starts without indentation is a URL pattern (`*` matches anything,
+// `:name` one path segment), the indented `Name: value` lines under it are
+// its headers, and `! Name` removes a header an earlier rule set. Patterns
+// here are paths; the kit serves one origin. Comments start with `#`.
+function headerRules(root) {
+  const file = join(root, "_headers");
+  if (!existsSync(file)) return [];
+  const rules = [];
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+    if (!/^\s/.test(line)) {
+      const source = line
+        .trim()
+        .split(/(\*|:[A-Za-z_]\w*)/)
+        .map((part) =>
+          part === "*"
+            ? ".*"
+            : part.startsWith(":")
+              ? "[^/]+"
+              : part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"),
+        )
+        .join("");
+      rules.push({ pattern: new RegExp(`^${source}$`), set: [], detach: [] });
+    } else if (rules.length > 0) {
+      const text = line.trim();
+      if (text.startsWith("!")) {
+        rules.at(-1).detach.push(text.slice(1).trim().toLowerCase());
+      } else {
+        const colon = text.indexOf(":");
+        if (colon > 0)
+          rules
+            .at(-1)
+            .set.push([
+              text.slice(0, colon).trim().toLowerCase(),
+              text.slice(colon + 1).trim(),
+            ]);
+      }
+    }
+  }
+  return rules;
+}
+
+// The headers the rules give a request path: values of a header set by
+// several matching rules are joined with ", ", as Pages does.
+function headersFor(rules, urlPath) {
+  const path = urlPath.split("?")[0].split("#")[0];
+  const headers = {};
+  for (const rule of rules) {
+    if (!rule.pattern.test(path)) continue;
+    for (const [name, value] of rule.set)
+      headers[name] = name in headers ? `${headers[name]}, ${value}` : value;
+    for (const name of rule.detach) delete headers[name];
+  }
+  return headers;
+}
+
 function serve(root) {
+  const rules = headerRules(root);
   const server = createServer((request, response) => {
     const file = fileFor(root, request.url ?? "/");
     if (file === null) {
@@ -80,6 +148,7 @@ function serve(root) {
       return;
     }
     response.writeHead(200, {
+      ...headersFor(rules, request.url ?? "/"),
       "content-type":
         TYPES[extname(file).toLowerCase()] ?? "application/octet-stream",
     });
@@ -91,7 +160,9 @@ function serve(root) {
 }
 
 async function axeRun(page, source) {
-  await page.addScriptTag({ content: source });
+  // Evaluated by the DevTools protocol, which the page's policy does not
+  // govern; a script element would be refused by script-src 'none'.
+  await page.evaluate(source);
   return await page.evaluate(async (tags) => {
     const result = await globalThis.axe.run(document, {
       runOnly: { type: "tag", values: tags },
@@ -203,6 +274,16 @@ async function main() {
           ? route.continue()
           : route.abort(),
       );
+      // Collect every Content-Security-Policy violation from the start of
+      // each document; init scripts are not subject to the page's policy.
+      await context.addInitScript(() => {
+        globalThis.__cspViolations = [];
+        document.addEventListener("securitypolicyviolation", (event) =>
+          globalThis.__cspViolations.push(
+            `${event.effectiveDirective} ${event.blockedURI || "(inline)"}`,
+          ),
+        );
+      });
       const page = await context.newPage();
       for (const path of input.pages) {
         const url = origin + "/" + path.replace(/index\.html$/, "");
@@ -214,6 +295,13 @@ async function main() {
               `${path}: HTTP ${response ? response.status() : "no response"}`,
             );
             break;
+          }
+          // Vacuity guard: the policy under test was really in force.
+          if (!(await response.allHeaders())["content-security-policy"]) {
+            problems.push(
+              `${path}: served without a Content-Security-Policy (the built _headers has no rule for it)`,
+            );
+            report.unprotected = (report.unprotected ?? 0) + 1;
           }
           if (width === NARROW) {
             const o = await overflow(page);
@@ -232,6 +320,16 @@ async function main() {
             problems.push(
               `${path} (${scheme}, ${width}px): axe ${v.id} (${v.impact}, ${v.nodes} node${v.nodes === 1 ? "" : "s"}, first ${v.target}): ${v.help}`,
             );
+          // Read after axe, so resources loaded late (fonts, background
+          // images) have been requested too.
+          const blocked = await page.evaluate(() => [
+            ...new Set(globalThis.__cspViolations ?? []),
+          ]);
+          for (const violation of blocked)
+            problems.push(
+              `${path} (${scheme}, ${width}px): Content-Security-Policy blocked ${violation}`,
+            );
+          report.policyChecks = (report.policyChecks ?? 0) + 1;
         }
       }
       await context.close();
@@ -245,6 +343,10 @@ async function main() {
   if (report.runs !== expected || expected === 0)
     problems.push(
       `axe ran ${report.runs} times; expected ${expected} (pages x widths x schemes)`,
+    );
+  if ((report.policyChecks ?? 0) !== expected)
+    problems.push(
+      `the Content-Security-Policy was checked ${report.policyChecks ?? 0} times; expected ${expected}`,
     );
   process.stdout.write("\n" + JSON.stringify({ report }) + "\n");
   process.exit(problems.length > 0 ? 1 : 0);

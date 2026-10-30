@@ -239,7 +239,14 @@ content feature, with no layouts of its own) with the theme and checks that:
   pixels wide, and no page scrolls sideways at 360 pixels. Its summary
   counts the boxes that scroll sideways inside the pages at 360 pixels
   (`pre 2, div.table-scroll 2` for the minimal theme), so you can see
-  whether the theme scrolls or wraps wide content.
+  whether the theme scrolls or wraps wide content;
+- in Chromium, every page is served with the headers of the built
+  `_headers`, so the generated Content-Security-Policy is enforced, and the
+  browser reports no violation of it. A theme's CSS must therefore stay in
+  its stylesheets or `<style>` elements (a layout with a `style` attribute
+  does not build), and its
+  stylesheets may load fonts and images only from the site (see
+  [Zero JavaScript by default](building-a-site.md#zero-javascript-by-default)).
 
 It exits with status 1 and names each problem when a check fails, and keeps
 the build for inspection.

@@ -25,7 +25,10 @@
 ##    wide; and no horizontal scroll at 360 pixels. The summary names the
 ##    boxes that scroll sideways inside the pages at 360 pixels (code
 ##    blocks, table wrappers), so whether a theme scrolls or wraps wide
-##    content is visible; axe requires every such box to be focusable.
+##    content is visible; axe requires every such box to be focusable. Every
+##    page is served with the built `_headers` (as Cloudflare Pages applies
+##    it), so the generated Content-Security-Policy is enforced, and any
+##    violation the browser reports is a failure.
 ##
 ## The browser checks run `theme_kit_browser.mjs` with the dev shell's pinned
 ## Playwright Chromium and axe-core. Nothing is mocked: the fixture is built
@@ -149,7 +152,8 @@ proc browserChecks*(output: string; pages: seq[string]): tuple[problems: seq[str
     if code != 0 and result.problems.len == 0:
       result.problems.add "the browser driver exited " & $code & " without naming a problem"
     if report.hasKey("runs"):
-      result.summary = $report["runs"].getInt & " axe runs over " & $pages.len & " pages (axe-core " &
+      result.summary = $report["runs"].getInt & " axe runs over " & $pages.len & " pages, each under " &
+        "the generated Content-Security-Policy (axe-core " &
         report{"axe"}.getStr("?") & ", Chromium " & report{"browser"}.getStr("?") & "); " &
         scrollerSummary(report{"scrollers"})
   finally: process.close()
@@ -227,7 +231,8 @@ proc runThemeKit*(theme: string; work: string; browser = true): KitReport =
   result.add "isonim-blog check (links, anchors, alt text, feeds)", findings
   if browser:
     let (problems, summary) = browserChecks(output, pages)
-    result.add "WCAG 2.2 AA (axe-core) in both schemes; no horizontal scroll at 360px",
+    result.add "WCAG 2.2 AA (axe-core) in both schemes; no horizontal scroll at 360px; " &
+      "no Content-Security-Policy violation",
       (if problems.len > 0: problems else: @[summary]), passed = problems.len == 0
 
 when isMainModule:

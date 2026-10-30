@@ -8,13 +8,13 @@ a deliberate local command.
 
 ## What is generated
 
-| File                            | Purpose                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `static/_headers`               | `Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy` and `Permissions-Policy` for every path, and a year of immutable caching for the fingerprinted files under `/assets/`. HTML keeps Pages' default caching, which revalidates on every request. The build appends the Content-Security-Policy that follows from the site's script policy and its remote image origins |
-| `static/_redirects`             | Your own redirects; the build appends one 301 rule per `redirect_from` entry                                                                                                                                                                                                                                                                                                                 |
-| `Justfile`                      | `artifact`, `deploy-preview` and `publish`, besides `serve`, `build` and `check`                                                                                                                                                                                                                                                                                                             |
-| `flake.nix`                     | The dev shell also provides the `wrangler` pinned by `flake.lock`                                                                                                                                                                                                                                                                                                                            |
-| `.github/workflows/preview.yml` | A preview deployment for every pushed branch except the production branch                                                                                                                                                                                                                                                                                                                    |
+| File                            | Purpose                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `static/_headers`               | `Strict-Transport-Security` (for this host only), `X-Content-Type-Options`, `Referrer-Policy` and `Permissions-Policy` for every path, and a year of immutable caching for the fingerprinted files under `/assets/`. HTML keeps Pages' default caching, which revalidates on every request. The build appends the Content-Security-Policy that follows from the site's script policy and its remote image origins |
+| `static/_redirects`             | Your own redirects; the build appends one 301 rule per `redirect_from` entry                                                                                                                                                                                                                                                                                                                                      |
+| `Justfile`                      | `artifact`, `deploy-preview` and `publish`, besides `serve`, `build` and `check`                                                                                                                                                                                                                                                                                                                                  |
+| `flake.nix`                     | The dev shell also provides the `wrangler` pinned by `flake.lock`                                                                                                                                                                                                                                                                                                                                                 |
+| `.github/workflows/preview.yml` | A preview deployment for every pushed branch except the production branch                                                                                                                                                                                                                                                                                                                                         |
 
 [`_headers`](https://developers.cloudflare.com/pages/configuration/headers/)
 and [`_redirects`](https://developers.cloudflare.com/pages/configuration/redirects/)
@@ -24,6 +24,18 @@ exceeds them. When two rules
 match a path, Pages sends a header set by both once, with both values joined,
 so set each header in one rule only, and do not add a Content-Security-Policy
 yourself.
+
+The generated `Strict-Transport-Security: max-age=31536000` tells browsers
+to use HTTPS for this host for a year. It has no `includeSubDomains`: a blog
+on `example.org` would otherwise commit every subdomain of `example.org`,
+including ones run by others, to HTTPS for a year. Add `includeSubDomains`,
+and then `preload` (which requires it), only once every subdomain serves
+HTTPS, and raise them in stages as [hstspreload.org](https://hstspreload.org/)
+advises; or manage HSTS for the whole zone in Cloudflare's SSL/TLS settings
+and remove the line. A site generated by an earlier version has
+`includeSubDomains` in its `static/_headers`; remove it there. The
+Content-Security-Policy the build appends is described in
+[Zero JavaScript by default](building-a-site.md#zero-javascript-by-default).
 
 Pages serves a project at the root of its own hostname, and the rules in
 both files name paths from the root of `public/`. A site with a `base_path`
@@ -47,12 +59,20 @@ Run them in the dev shell (`nix develop`), where `wrangler` is the pinned one.
 - `just deploy-preview [branch]` deploys a preview of the committed site
   under the branch's name, the current branch by default. It refuses the
   production branch (and a detached HEAD) before building anything.
-- `just publish` deploys production. It refuses a working tree with
-  uncommitted changes, builds the artifact, lists the posts that are new,
-  changed or removed since the last `published/*` tag (every post on the
-  first publish), and asks you to type `publish <project>`. Anything else
-  deploys nothing. After the deployment it tags the commit
-  `published/<UTC time>`; push the tag to share it.
+- `just publish [--yes]` deploys production. It refuses a working tree with
+  uncommitted changes, and a repository without the git remote it pushes
+  its tag to (`remote` in the `Justfile`, `origin` by default). It builds
+  the artifact, lists the posts that are new, changed or removed since the
+  last `published/*` tag (every post on the first publish), and asks you to
+  type `publish <project>`; anything else deploys nothing. `--yes` skips
+  the question, for publishing from a script. It deploys with
+  `--commit-hash` naming the commit, and gives `wrangler` no input, so a
+  missing project is an error rather than a question. After the deployment
+  it tags the commit `published/<UTC time>` and pushes the tag to the
+  remote, so every author lists changes against the same last publish
+  (fetch the tags, `git fetch --tags`, before publishing from another
+  clone). If the push fails, the deployment and the local tag stand, and
+  `publish` exits with status 1 and prints the `git push` that finishes it.
 
 ## The preview workflow
 

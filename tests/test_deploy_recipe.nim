@@ -8,7 +8,14 @@
 ## records its argv and exits 0. The recipe must never reach Cloudflare from a
 ## test (that needs an account and credentials, and would deploy), and what
 ## the recipe decides is exactly the argv it hands wrangler, or that it hands
-## none. No Cloudflare account is touched.
+## none. The stub also records what it can read on stdin, so the test sees
+## that production deploys never leave wrangler a question to answer. No
+## Cloudflare account is touched.
+##
+## The published/* tag is pushed for real, with the real git, to a bare
+## repository in the test's temporary directory standing in for the site's
+## hosted remote (a local path is an ordinary git remote), so nothing leaves
+## the machine.
 ##
 ## The site's flake.lock pins the framework input to a copy of this checkout,
 ## so the artifact is built from the code under test with no network. Like
@@ -18,13 +25,16 @@ import isonim_blog
 import isonim_blog/runtime
 import ./site_helpers
 
-proc stubWrangler(directory: string): tuple[bin, log: string] =
-  ## `wrangler` that appends one line per call: its arguments, tab-separated.
+proc stubWrangler(directory: string): tuple[bin, log, input: string] =
+  ## `wrangler` that appends one line per call: its arguments, tab-separated;
+  ## and appends what it reads on stdin to `input`.
   result.bin = directory / "stub-bin"
   result.log = directory / "wrangler-calls.log"
+  result.input = directory / "wrangler-stdin.log"
   createDir(result.bin)
   writeFile(result.bin / "wrangler", "#!" & tool("bash") & "\n" &
-    "IFS=$'\\t'; printf '%s\\n' \"$*\" >> " & quoteShell(result.log) & "\n")
+    "IFS=$'\\t'; printf '%s\\n' \"$*\" >> " & quoteShell(result.log) & "\n" &
+    "cat >> " & quoteShell(result.input) & "\n")
   setFilePermissions(result.bin / "wrangler", {fpUserRead, fpUserWrite, fpUserExec})
 
 proc calls(log: string): seq[seq[string]] =
@@ -56,6 +66,12 @@ suite "the Cloudflare Pages recipe":
       check fileExists(site / path)
       check generated.output.contains("  " & path & "\n")
     let headers = readFile(site / "static/_headers")
+    # HSTS for this host only: includeSubDomains (and preload, which needs
+    # it) would commit every sibling subdomain to HTTPS for a year.
+    check headers.contains("\n  Strict-Transport-Security: max-age=31536000\n")
+    let rules = headers.splitLines().filterIt(not it.startsWith("#")).join("\n")
+    check "includeSubDomains" notin rules
+    check "preload" notin rules
     for header in ["Strict-Transport-Security: max-age=31536000", "X-Content-Type-Options: nosniff",
         "Referrer-Policy: strict-origin-when-cross-origin", "Permissions-Policy: ",
         "/assets/*\n  Cache-Control: public, max-age=31536000, immutable"]:
@@ -95,7 +111,9 @@ suite "the Cloudflare Pages recipe":
     let headers = readFile(site / "public/_headers")
     check headers.startsWith(readFile(site / "static/_headers"))
     check headers.count("Content-Security-Policy:") == 1
-    check headers.contains("/*\n  Content-Security-Policy: default-src 'self'; script-src 'none';")
+    check headers.contains("/*\n  Content-Security-Policy: default-src 'none'; script-src 'none'; style-src 'self';")
+    check headers.contains("; form-action 'self'; frame-ancestors 'none'\n")
+    check "unsafe-inline" notin headers
     check ruleCount(headers) == 3
     # Pages with different policies keep one rule each.
     check headersFor([("/a/", "p"), ("/b/", "p")]) == "/*\n  Content-Security-Policy: p\n"
@@ -153,14 +171,30 @@ suite "the Cloudflare Pages recipe":
     check fpUserWrite in getFilePermissions(site / "public/index.html")
     check tags(site).len == 0
 
-  test "publish lists what goes live, refuses without the typed confirmation, then deploys and tags":
+  test "publish lists what goes live, asks for the typed confirmation or --yes, deploys, tags and pushes the tag":
     writeFile(site / "log.txt", "")
     removeFile(stub.log)
+    if fileExists(stub.input): removeFile(stub.input)
     # A dirty tree is refused before anything else.
     let dirty = just(["publish"], input = "publish travel-notes\n")
     check dirty.code != 0
     check dirty.output.contains("commit or stash")
     removeFile(site / "log.txt")
+    let unknown = just(["publish", "--force"], input = "publish travel-notes\n")
+    check unknown.code != 0
+    check unknown.output.contains("publish: unknown argument --force (the only option is --yes)")
+    # The tag is pushed, so a repository without the remote is refused
+    # before anything is built or deployed.
+    let noRemote = just(["publish", "--yes"])
+    check noRemote.code != 0
+    check noRemote.output.contains("the tag is pushed to the git remote origin, which this repository does not have")
+    check not noRemote.output.contains("Going live")
+    check calls(stub.log).len == 0
+    check tags(site).len == 0
+    # The site's hosted repository: a bare repository beside it.
+    let remote = work / "hosted.git"
+    check runProcess(tool("git"), ["init", "--quiet", "--bare", remote]).code == 0
+    check runProcess(tool("git"), ["-C", site, "remote", "add", "origin", remote]).code == 0
     for answer in ["", "yes\n", "publish\n", "publish travel-notes-x\n"]:
       let declined = just(["publish"], input = answer)
       check declined.code != 0
@@ -170,17 +204,25 @@ suite "the Cloudflare Pages recipe":
       check declined.output.contains("-hello-world.md")
     check calls(stub.log).len == 0
     check tags(site).len == 0
+    check tags(remote).len == 0
 
     let head = runProcess(tool("git"), ["-C", site, "rev-parse", "HEAD"]).output.strip()
-    let published = just(["publish"], input = "publish travel-notes\n")
+    # A line typed after the confirmation is still waiting on stdin; wrangler
+    # must not be able to read it as the answer to a question of its own.
+    let published = just(["publish"], input = "publish travel-notes\ny\n")
     check published.code == 0
     if published.code != 0: echo published.output
     check calls(stub.log) == @[@["pages", "deploy", "public", "--project-name=travel-notes",
       "--branch=main", "--commit-hash=" & head]]
+    check fileExists(stub.input)
+    check readFile(stub.input) == ""
     let made = tags(site)
     check made.len == 1
     check runProcess(tool("git"), ["-C", site, "rev-parse", made[0] & "^{commit}"]).output.strip() == head
-    check published.output.contains("Tagged " & made[0])
+    check published.output.contains("Tagged " & made[0] & " and pushed it to origin.")
+    # The annotated tag reached the hosted repository, naming the deployed commit.
+    check tags(remote) == made
+    check runProcess(tool("git"), ["-C", remote, "rev-parse", made[0] & "^{commit}"]).output.strip() == head
 
     # The next publish lists only what changed since that tag.
     writeFile(site / "posts/2021-01-01-second.md", "---\ntitle: Second\ndescription: Another\n---\nMore.\n")
@@ -191,4 +233,32 @@ suite "the Cloudflare Pages recipe":
     check next.output.contains("new      posts/2021-01-01-second.md")
     check not next.output.contains("hello-world")
     check calls(stub.log).len == 1
+
+    # --yes stands in for the typed confirmation, for scripted publishing.
+    sleep(1100)  # tags are named to the second
+    let second = runProcess(tool("git"), ["-C", site, "rev-parse", "HEAD"]).output.strip()
+    let confirmed = just(["publish", "--yes"])
+    check confirmed.code == 0
+    if confirmed.code != 0: echo confirmed.output
+    check confirmed.output.contains("new      posts/2021-01-01-second.md")
+    check confirmed.output.contains("Confirmed by --yes.")
+    check not confirmed.output.contains("Type 'publish")
+    check calls(stub.log).len == 2
+    check calls(stub.log)[^1] == @["pages", "deploy", "public", "--project-name=travel-notes",
+      "--branch=main", "--commit-hash=" & second]
+    check tags(site).len == 2
+    check tags(remote) == tags(site)
+
+    # A push that fails after the deployment says what happened and how to
+    # finish; the deployment and the local tag stand.
+    sleep(1100)
+    check runProcess(tool("git"), ["-C", site, "remote", "set-url", "origin", work / "gone.git"]).code == 0
+    let unpushed = just(["publish", "--yes"])
+    check unpushed.code != 0
+    check calls(stub.log).len == 3
+    let newest = tags(site)
+    check newest.len == 3
+    check unpushed.output.contains("publish: deployed and tagged " & newest[^1] &
+      ", but pushing the tag to origin failed; push it with: git push origin " & newest[^1])
+    check tags(remote).len == 2
     removeDir(work)

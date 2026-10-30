@@ -1,5 +1,7 @@
 ## Content-only execution of a compiled site's layout registry.
 import std/[os, strutils, json, tables, sets, algorithm, uri]
+from std/unicode import Rune, `$`, runeLen, runeOffset
+from std/htmlparser import entityToUtf8
 import ./[model, inputs, version, html_checks, archives, listing, syndication, og]
 import isonim/content/[markdown, prose, directives]
 import isonim/static/[exporter, buildinfo, assets, head, csp, sitemap, robots, ogimage, feeds]
@@ -149,10 +151,117 @@ proc ruleCount*(text: string): int =
   for line in text.splitLines():
     if line.len > 0 and line[0] notin {' ', '\t', '#'}: inc result
 
+proc blogContentSecurityPolicy*(scripts: openArray[PageScript];
+    imageOrigins: openArray[string]; styleBodies: openArray[string] = []): string =
+  ## The Content-Security-Policy of a page that keeps `scripts` (after the
+  ## script policy) and may show images from `imageOrigins` (normalised
+  ## origins, the site's own excluded). It starts from `default-src 'none'`
+  ## and allows only what a built page loads, as OWASP's baseline does
+  ## (https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html):
+  ##
+  ## * `script-src`: `'none'` without scripts; otherwise `'self'` for a
+  ##   script on the site (the islands bundle, a self-hosted beacon), the
+  ##   absolute URL of a script elsewhere, and the SHA-256 of each inline
+  ##   script (`isonim/static/csp`). A source expression needs a host
+  ##   (https://www.w3.org/TR/CSP3/#grammardef-host-source), so a path such
+  ##   as `/assets/islands.<hash>.js` would be ignored and the script
+  ##   blocked; `'self'` also holds on preview hosts and `serve`.
+  ## * `style-src 'self'` and the SHA-256 of each `<style>` element's text
+  ##   in `styleBodies`, as Astro's CSP support hashes the inline styles it
+  ##   emits (https://www.w3.org/TR/CSP3/#grammardef-hash-source). A `style`
+  ##   attribute would need `'unsafe-hashes'`, so the build refuses it
+  ##   (`inlineStyles`), and no `'unsafe-inline'` is needed.
+  ## * `img-src 'self' data:` and the remote image origins; `font-src`,
+  ##   `media-src` and `manifest-src 'self'`; `connect-src 'self'` only
+  ##   when a script can make requests.
+  ## * `base-uri 'self'`, `form-action 'self'` and `frame-ancestors 'none'`
+  ##   (no framing, against clickjacking), which do not fall back to
+  ##   `default-src` (https://www.w3.org/TR/CSP3/#directive-default-src).
+  ##   `frame-ancestors` works only in a header, not in a meta element, so
+  ##   the policy is delivered through `_headers`.
+  var scriptSources: seq[string]
+  for script in scripts:
+    if script.src.len == 0: continue  # inline: allowed by its hash
+    let source = if script.src.startsWith("/") and not script.src.startsWith("//"): "'self'"
+      else: script.src
+    if source notin scriptSources: scriptSources.add source
+  if scripts.len == 0: scriptSources = @["'none'"]
+  var styleSources = @["'self'"]
+  for body in styleBodies:
+    let source = cspHashSource(body)
+    if source notin styleSources: styleSources.add source
+  var directives = @[
+    CspDirective(name: "default-src", sources: @["'none'"]),
+    CspDirective(name: "script-src", sources: scriptSources),
+    CspDirective(name: "style-src", sources: styleSources),
+    CspDirective(name: "img-src", sources: @["'self'", "data:"] & @imageOrigins),
+    CspDirective(name: "font-src", sources: @["'self'"]),
+    CspDirective(name: "media-src", sources: @["'self'"]),
+    CspDirective(name: "manifest-src", sources: @["'self'"])]
+  if scripts.len > 0: directives.add CspDirective(name: "connect-src", sources: @["'self'"])
+  directives.add [
+    CspDirective(name: "base-uri", sources: @["'self'"]),
+    CspDirective(name: "form-action", sources: @["'self'"]),
+    CspDirective(name: "frame-ancestors", sources: @["'none'"])]
+  cspHeaderValue(CspConfig(enabled: true, directives: directives), inlineScriptBodies(scripts))
+
+proc excerptText*(html: string): string =
+  ## The text of rendered excerpt HTML, for a meta description: tags
+  ## dropped (a block element's end separates words), character references
+  ## decoded, whitespace collapsed to single spaces.
+  const blockTags = ["p", "div", "li", "ul", "ol", "dl", "dt", "dd", "br", "h1", "h2", "h3",
+    "h4", "h5", "h6", "blockquote", "pre", "figure", "figcaption", "table", "tr", "td", "th",
+    "section", "aside", "hr"]
+  var text = ""
+  var i = 0
+  while i < html.len:
+    case html[i]
+    of '<':
+      let stop = html.find('>', i)
+      if stop < 0: break
+      var name = html[i + 1 ..< stop].strip(chars = {'/', ' '}).toLowerAscii
+      let space = name.find({' ', '\t', '\n', '/'})
+      if space >= 0: name.setLen(space)
+      if name in blockTags: text.add ' '
+      i = stop + 1
+    of '&':
+      let stop = html.find(';', i)
+      let entity = if stop > i and stop - i <= 32: html[i + 1 ..< stop] else: ""
+      var decoded = ""
+      if entity.len > 1 and entity[0] == '#':
+        try:
+          let code = if entity[1] in {'x', 'X'}: parseHexInt(entity[2 .. ^1]) else: parseInt(entity[1 .. ^1])
+          if code > 0 and code <= 0x10FFFF and code notin 0xD800 .. 0xDFFF: decoded = $Rune(code)
+        except ValueError: discard
+      elif entity.len > 0:
+        decoded = entityToUtf8(entity)
+      if decoded.len > 0:
+        text.add decoded
+        i = stop + 1
+      else:
+        text.add '&'
+        inc i
+    else:
+      text.add html[i]
+      inc i
+  text.splitWhitespace().join(" ")
+
+proc shortDescription*(text: string): string =
+  ## `text` cut to at most `maxDescriptionRunes` characters at a word
+  ## boundary, with an ellipsis when it was cut (a word longer than the
+  ## limit is cut inside the word).
+  if text.runeLen <= maxDescriptionRunes: return text
+  let limit = text.runeOffset(maxDescriptionRunes - 1)
+  var cut = text[0 ..< limit]
+  let space = cut.rfind(' ')
+  if space > 0: cut.setLen(space)
+  cut.strip(leading = false, chars = Whitespace + {',', ';', ':', '-'}) & "…"
+
 proc headersFor*(pagePolicies: openArray[tuple[url, policy: string]]): string =
   ## The Content-Security-Policy rules for `_headers`. When every page has
   ## the same policy (the script policy is site-wide, so this is the normal
-  ## case) one `/*` rule carries it, which keeps a large site far below the
+  ## case unless layouts emit different `<style>` elements on different
+  ## pages) one `/*` rule carries it, which keeps a large site far below the
   ## host's rule limit; otherwise each page gets its own rule.
   if pagePolicies.len == 0: return ""
   var uniform = true
@@ -474,12 +583,28 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
       fail("output collision: " & origins[rel.toLowerAscii] & " and " & page.source)
     origins[rel.toLowerAscii] = page.source
     let isPost = page.kind == pkContent and page.collection == "posts"
+    # The meta description falls back to the excerpt, then to the site's
+    # description, as jekyll-seo-tag and Hugo do; a content page without its
+    # own is a warning naming the fallback. Layouts still see the page's
+    # own (possibly empty) description.
+    var description = page.description
+    if description.len == 0:
+      let excerpt = shortDescription(excerptText(page.excerpt))
+      description = if excerpt.len > 0: excerpt else: site.config.description
+      if page.kind == pkContent:
+        let fallback =
+          if excerpt.len > 0: "uses the excerpt"
+          elif description.len > 0: "uses the site's description"
+          else: "is empty (no excerpt, and site.toml has no description)"
+        site.warnings.add page.source & ": description is missing; the meta description " & fallback
+    var headPage = page
+    headPage.description = description
     var documentHead = DocumentHead(title: formatPageTitle(page.title, site.config.title),
-      description: page.description, siteName: site.config.title,
+      description: description, siteName: site.config.title,
       canonicalUrl: if page.canonical.len > 0: page.canonical else: site.config.url & page.url,
       ogType: if isPost: "article" else: "website",
       ogImage: ogImageUrl(page), twitterCard: "summary_large_image", themeColors: colorMetas)
-    documentHead.jsonLd = jsonLdFor(site, page, documentHead.canonicalUrl)
+    documentHead.jsonLd = jsonLdFor(site, headPage, documentHead.canonicalUrl)
     let bodyHtml = applyLayouts(page, site, layouts)
     let headHtml = renderPageHeadHtml(documentHead, keptScripts, policy = site.config.scriptPolicy)
     let ending = renderBodyEndScriptsHtml(keptScripts, policy = site.config.scriptPolicy)
@@ -512,19 +637,32 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     if actualScripts != keptScripts.len:
       fail(page.source & ": a layout emitted an undeclared script or data block")
     if eventHandlerAttributes(document).len > 0: fail(page.source & ": inline event handlers are not declared islands")
-    var policy = strictCspConfig()
-    for directive in policy.directives.mitems:
-      if directive.name == "script-src":
-        directive.sources = @[]
-        for script in keptScripts:
-          if script.src.len > 0: directive.sources.add script.src
-        if directive.sources.len == 0 and keptScripts.len == 0: directive.sources = @["'none'"]
-      elif directive.name == "img-src":
-        for origin in site.config.remoteImageOrigins:
-          if origin != ownOrigin: directive.sources.add origin
+    # A <style> element is allowed by the hash of its text. The HTML parser
+    # turns CR LF and CR into LF before the browser hashes the text; inside
+    # SVG or MathML it also decodes references and CDATA, so text whose
+    # hash cannot be computed from its bytes is refused, as is a NUL (which
+    # the parser replaces).
+    let (styles, unstyled) = styleElements(document)
+    var styleBodies: seq[string]
+    for element in styles:
+      let body = element.body.replace("\r\n", "\n").replace('\r', '\n')
+      if '\0' in body or (element.foreign and body.contains({'&', '<'})):
+        fail(page.source & ": a layout emitted a <style> element whose text the " &
+          "Content-Security-Policy cannot allow by its hash ('&', '<' inside inline SVG or MathML, " &
+          "or a NUL); move it into a stylesheet under assets/")
+      if body notin styleBodies: styleBodies.add body
+    # A style attribute could be allowed only with 'unsafe-hashes', so it
+    # fails the build instead of shipping a page the browser breaks.
+    let inline = inlineStyles(unstyled)
+    if inline.len > 0:
+      fail(page.source & ": a layout emitted inline CSS (" & inline[0] & "), which the " &
+        "Content-Security-Policy blocks; move it into a stylesheet under assets/ or a <style> element")
+    var imageOrigins: seq[string]
+    for origin in site.config.remoteImageOrigins:
+      if origin != ownOrigin: imageOrigins.add origin
     # `_headers` rules are matched by the host against paths from the
     # output root, so they name the route, not the URL.
-    pagePolicies.add (route, cspHeaderValue(policy, inlineScriptBodies(keptScripts)))
+    pagePolicies.add (route, blogContentSecurityPolicy(keptScripts, imageOrigins, styleBodies))
     # The sitemap lists neither drafts and noindex pages nor posts dated
     # after the build date (present only with --future), nor a listing page
     # that lists only such posts.

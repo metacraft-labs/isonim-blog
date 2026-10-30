@@ -225,3 +225,46 @@ suite "site origin":
         "https://example.io", "http://localhost:4000", "", "https://examples.org"]:
       checkpoint url
       check not isPlaceholderOrigin(url)
+
+suite "check settings":
+  test "skip_external takes host names and http(s) URL prefixes, normalised and validated":
+    let config = parseConfig(%*{"title": "N", "check": {"skip_external": [
+      "Twitter.com", "HTTPS://LinkedIn.com/In/", "linkedin.com", "twitter.com",
+      " https://www.example.org/Members "]}})
+    # Host names and the scheme and host of prefixes lose their case; the
+    # path of a prefix keeps it; duplicates collapse; surrounding space goes.
+    check config.skipExternal == @["twitter.com", "https://linkedin.com/In/", "linkedin.com",
+      "https://www.example.org/Members"]
+    # [check] is a known table, not an unknown key for layouts.
+    check config.extra.len == 0
+    check parseConfig(%*{"title": "N"}).skipExternal.len == 0
+    check parseSkipExternal("http://127.0.0.1:8080/skipped/") == "http://127.0.0.1:8080/skipped/"
+    check parseSkipExternal("xn--bcher-kva.example") == "xn--bcher-kva.example"
+    check parseSkipExternal("https://Example.COM") == "https://example.com"
+    for bad in ["", "  ", "ftp://example.com/", "mailto:x@example.com", "example.com/path",
+        "example.com:8080", "https://", "https://user@example.com/", "https://example.com/a b",
+        "https://example.com/#top", "-bad.example", "bad-.example", ".example.com",
+        "example.com.", "exa mple.com", "*.example.com", "example..com", "//example.com/"]:
+      checkpoint bad
+      expect BlogError: discard parseSkipExternal(bad)
+    for node in [%*{"skip_external": "twitter.com"}, %*{"skip_external": [1]},
+        %*{"skip_external": ["ok.example", "bad/path"]}, %*{"skip_extrenal": ["twitter.com"]},
+        %*{"skip_external": [], "other": true}]:
+      checkpoint $node
+      expect BlogError: discard parseConfig(%*{"title": "N", "check": node})
+    expect BlogError: discard parseConfig(%*{"title": "N", "check": ["twitter.com"]})
+
+  test "skip_external matches prefixes, and hosts with their subdomains":
+    let skip = parseConfig(%*{"title": "N", "check": {"skip_external": [
+      "twitter.com", "https://example.org/members/"]}}).skipExternal
+    for url in ["https://twitter.com/someone", "http://twitter.com", "https://mobile.twitter.com/x",
+        "https://TWITTER.com/x", "https://twitter.com./x", "https://example.org/members/page",
+        "HTTPS://Example.ORG/members/", "https://example.org/members/?q=1"]:
+      checkpoint url
+      check skipsExternal(skip, url)
+    for url in ["https://nottwitter.com/x", "https://twitter.com.evil.example/x",
+        "https://example.org/Members/page", "https://example.org/membership", "http://example.org/members/x",
+        "https://example.org/", "https://www.example.org/members/x"]:
+      checkpoint url
+      check not skipsExternal(skip, url)
+    check not skipsExternal(@[], "https://twitter.com/")

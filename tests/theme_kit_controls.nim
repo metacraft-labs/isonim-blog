@@ -7,7 +7,11 @@
 ## Defects: low text contrast in the light scheme only, then in the dark
 ## scheme only (both schemes are checked, and separately); a header wider
 ## than a 360px screen; a layout that emits a script; a missing post layout;
-## a table that scrolls without the renderer's focusable wrapper.
+## a table that scrolls without the renderer's focusable wrapper; a
+## stylesheet that loads an image the Content-Security-Policy does not allow
+## (only a browser that enforces the generated policy sees it); a layout that
+## emits a style attribute, which the policy would block. A layout's `<style>`
+## element, which the policy allows by its hash, must pass in the browser.
 ##
 ## The shipped theme's handling of wide content is checked here too, in the
 ## browser: by default the fixture's long code lines and wide tables scroll
@@ -104,6 +108,27 @@ control("a table that scrolls itself, outside the focusable wrapper, fails axe",
   let css = theme / "assets/minimal.css"
   writeFile(css, readFile(css) & "\n.prose table { display: block; overflow-x: auto; }\n"),
   expectPass = false, present = ["(light, 360px): axe scrollable-region-focusable", "> table): Scrollable region must have keyboard access"])
+control("a stylesheet loading an image from another origin violates the Content-Security-Policy", proc(theme: string) =
+  # The build accepts any stylesheet; only the browser, enforcing the
+  # generated policy (img-src 'self' data:), refuses the image.
+  let css = theme / "assets/minimal.css"
+  writeFile(css, readFile(css) & "\nbody { background-image: url(\"https://elsewhere.example/texture.png\"); }\n"),
+  expectPass = false, present = ["FAIL WCAG 2.2 AA",
+    "(light, 360px): Content-Security-Policy blocked img-src https://elsewhere.example/texture.png",
+    "(dark, 1280px): Content-Security-Policy blocked img-src https://elsewhere.example/texture.png"],
+  absent = ["axe color-contrast"])
+control("a layout that emits inline CSS fails the build", proc(theme: string) =
+  replaceIn(theme / "layouts/base.nim", "    raw footer\n",
+    "    raw footer\n    raw \"<p style=\\\"color: red\\\">Styled inline</p>\"\n"),
+  expectPass = false, present = ["FAIL the fixture builds with the theme",
+    "a layout emitted inline CSS (<p style>)"])
+control("a layout's <style> element is allowed by its hash in the browser", proc(theme: string) =
+  # The build hashes the element's text into style-src; a hash that did
+  # not match what Chromium hashes would be reported as a violation.
+  replaceIn(theme / "layouts/base.nim", "    raw footer\n",
+    "    raw footer\n    raw \"<style>body > footer { outline-offset: 2px; }\\r\\n</style>\"\n"),
+  expectPass = true, present = ["PASS WCAG 2.2 AA", "The theme conforms."],
+  absent = ["Content-Security-Policy blocked"])
 control("a theme without a post layout fails naming it", proc(theme: string) =
   removeFile(theme / "layouts/post.nim"),
   expectPass = false, present = ["FAIL required layouts", "missing layouts/post.nim"])

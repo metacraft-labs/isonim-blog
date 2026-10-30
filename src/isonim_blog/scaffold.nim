@@ -188,6 +188,10 @@ const deployVariables = """
 project := @PROJECT@
 production_branch := @BRANCH@
 
+# The git remote `just publish` pushes its published/<time> tag to, so every
+# author lists changes against the same last publish.
+remote := "origin"
+
 # Extra `nix build` arguments, for example `--override-input isonim-blog <path>`.
 nix_flags := ""
 """
@@ -217,13 +221,31 @@ deploy-preview branch=`git rev-parse --abbrev-ref HEAD`:
     just nix_flags={{ quote(nix_flags) }} artifact
     wrangler pages deploy public --project-name={{ quote(project) }} --branch="$branch" --commit-hash="$(git rev-parse HEAD)"
 
-# Build production, list what goes live, require a typed confirmation, deploy
-# to the production branch and tag the commit published/<time>
-publish:
+# Build production, list what goes live, require a typed confirmation (or
+# --yes), deploy to the production branch, tag the commit published/<time>
+# and push the tag
+[positional-arguments]
+publish *flags:
     #!/usr/bin/env bash
     set -euo pipefail
+    confirmed=false
+    for flag in "$@"; do
+      case "$flag" in
+        --yes) confirmed=true ;;
+        *)
+          echo "publish: unknown argument $flag (the only option is --yes)" >&2
+          exit 2
+          ;;
+      esac
+    done
     if [ -n "$(git status --porcelain)" ]; then
       echo "publish: commit or stash your changes first; the deployment is tagged with the commit" >&2
+      exit 1
+    fi
+    remote={{ quote(remote) }}
+    if ! git remote get-url "$remote" >/dev/null 2>&1; then
+      echo "publish: the tag is pushed to the git remote $remote, which this repository does not have;" \
+        "add it (git remote add $remote <url>) or set remote in the Justfile" >&2
       exit 1
     fi
     just nix_flags={{ quote(nix_flags) }} artifact
@@ -237,16 +259,28 @@ publish:
         awk -F '\t' '{ printf "  %-8s %s\n", ($1 == "A") ? "new" : ($1 == "D") ? "removed" : "changed", $2 }')"
     fi
     echo "${changes:-  (no post changes)}"
-    expected={{ quote("publish " + project) }}
-    read -r -p "Type '$expected' to deploy to production: " answer || answer=""
-    if [ "$answer" != "$expected" ]; then
-      echo "publish: not confirmed; nothing was deployed" >&2
-      exit 1
+    if [ "$confirmed" = true ]; then
+      echo "Confirmed by --yes."
+    else
+      expected={{ quote("publish " + project) }}
+      read -r -p "Type '$expected' to deploy to production: " answer || answer=""
+      if [ "$answer" != "$expected" ]; then
+        echo "publish: not confirmed; nothing was deployed" >&2
+        exit 1
+      fi
     fi
-    wrangler pages deploy public --project-name={{ quote(project) }} --branch={{ quote(production_branch) }} --commit-hash="$(git rev-parse HEAD)"
+    # wrangler asks questions (such as whether to create a missing project)
+    # only when its input is a terminal; production never stops at a prompt.
+    wrangler pages deploy public --project-name={{ quote(project) }} --branch={{ quote(production_branch) }} \
+      --commit-hash="$(git rev-parse HEAD)" </dev/null
     tag="published/$(date -u +%Y%m%dT%H%M%SZ)"
     git tag -a "$tag" -m "Published to Cloudflare Pages project "{{ quote(project) }}
-    echo "Tagged $tag. Share it with: git push origin $tag"
+    if ! git push "$remote" "refs/tags/$tag"; then
+      echo "publish: deployed and tagged $tag, but pushing the tag to $remote failed;" \
+        "push it with: git push $remote $tag" >&2
+      exit 1
+    fi
+    echo "Tagged $tag and pushed it to $remote."
 """
 
 const workflowTemplate = """# Deploys a Cloudflare Pages preview of every pushed branch except the
@@ -287,8 +321,10 @@ const headersTemplate = """# Response headers for Cloudflare Pages (Netlify read
 # default caching (revalidated on every request); fingerprinted assets never
 # change, so they are cached for a year. A header set by two matching rules
 # is sent once with both values, so set each header in one rule only.
+# HTTPS for a year on this host only: add includeSubDomains (and later
+# preload) only once every subdomain of the domain serves HTTPS.
 /*
-  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Strict-Transport-Security: max-age=31536000
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
