@@ -282,6 +282,124 @@ suite "the minimal theme: long code lines and wide tables":
     # The excerpt (printed first) is numbered; the content keeps the caption.
     check names == @["label Files in the bundle (2)", "caption table_caption-1"]
 
+  test "IDs stay unique and in-page links find their targets wherever a layout prints excerpts":
+    # HTML requires unique IDs (https://html.spec.whatwg.org/multipage/dom.html#the-id-attribute),
+    # and a fragment link to a repeated one goes to the first. The parser's
+    # heading, endnote and reference IDs are unique within one document, and
+    # pages join several renderings: the capability theme prints a post's
+    # excerpt beside its content, and this copy of it also prints every other
+    # post's excerpt there, as a listing joins excerpts (two of them with an
+    # endnote here). That excerpt's caption repeats a caption of the
+    # content of the post whose page shows it, so its region needs a
+    # different name too.
+    let root = createTempDir("isonim-blog-excerpt-ids-", "")
+    defer: removeDir(root)
+    let theme = root / "theme"
+    copyDir(repoRoot / "tests/fixtures/theme-capabilities", theme)
+    let layout = theme / "layouts/post.nim"
+    let details = "      tdiv(class = \"details\"):\n        raw content\n"
+    check details in readFile(layout)
+    writeFile(layout, readFile(layout).replace(details, details &
+      "      tdiv(class = \"elsewhere\"):\n        for other in site.posts:\n" &
+      "          if other.url != page.url: raw other.excerpt\n"))
+    copyDir(conformanceFixture, root / "site")
+    # Feeds carry excerpts (summaries), not full contents.
+    writeFile(root / "site/site.toml", "theme = " & $(%theme) & "\n" & readFile(root / "site/site.toml") &
+      "\n[feeds]\nfull_content = false\n")
+    # A second table with the essay's caption: the essay's content then has
+    # the names "How three features are written" and "… (2)", and the
+    # pictures excerpt below, whose own content holds the same caption once,
+    # must not take "(2)" when it is printed on the essay's page.
+    let essaySource = root / "site/posts/2024-01-10-every-prose-feature.md"
+    check "\n: How three features are written\n" in readFile(essaySource)
+    writeFile(essaySource, readFile(essaySource).replace("\n: How three features are written\n",
+      "\n: How three features are written\n\n| Again |\n| ----- |\n| 1     |\n\n: How three features are written\n"))
+    let post = root / "site/posts/2024-02-14-pictures/index.md"
+    let source = readFile(post)
+    check "| figure.svg | SVG    |\n\n<!--more-->" in source
+    writeFile(post, source.replace("<!--more-->", "Table: How three features are written\n\n" &
+      "A bundle keeps them together.[^bundle]\n\n<!--more-->") &
+      "\n[^bundle]: A directory holding the post and its files.\n")
+    let public = root / "public"
+    discard buildSite(root / "site", BuildOptions(drafts: true, outDir: public, now: "@" & kitEpoch))
+    proc attributeValues(html, name: string): seq[string] =
+      var at = 0
+      while true:
+        at = html.find(" " & name & "=\"", at)
+        if at < 0: break
+        let start = at + name.len + 3
+        result.add html[start ..< html.find('"', start)]
+        at = start
+    var pages = 0
+    for file in walkDirRec(public):
+      if not file.endsWith(".html"): continue
+      inc pages
+      let page = relativePath(file, public)
+      let html = readFile(file)
+      let ids = attributeValues(html, "id")
+      for n, id in ids:
+        if id in ids[n + 1 .. ^1]: checkpoint(page & " repeats the ID " & id)
+        check id notin ids[n + 1 .. ^1]
+      for href in attributeValues(html, "href"):
+        if href.startsWith("#") and href.len > 1:
+          if href[1 .. ^1] notin ids: checkpoint(page & " links to the missing #" & href[1 .. ^1])
+          check href[1 .. ^1] in ids
+        # An excerpt's own endnote links stay on the page that shows it.
+        elif "#excerpt." in href:
+          checkpoint(page & " sends an excerpt's own link elsewhere: " & href)
+          check false
+      var names: seq[string]
+      for element in htmlElements(file, "div"):
+        if element.getOrDefault("class") != "table-scroll": continue
+        var name = element.getOrDefault("aria-label")
+        if element.hasKey("aria-labelledby"):
+          let id = element["aria-labelledby"]
+          let start = html.find("<caption id=\"" & id & "\">") + 15 + id.len
+          name = html[start ..< html.find("</caption>", start)]
+        if name.toLowerAscii() in names: checkpoint(page & " repeats the region name " & name)
+        check name.toLowerAscii() notin names
+        names.add name.toLowerAscii()
+    # Vacuity guards: the joined renderings are there.
+    check pages > 10
+    let essay = readFile(public / "posts/every-prose-feature/index.html")
+    check essay.count("role=\"doc-endnotes\"") == 3 # content, its excerpt, the other's
+    check "id=\"excerpt.posts.pictures_fn-1\"" in essay
+    check "aria-label=\"How three features are written (2)\"" in essay
+    check "aria-label=\"How three features are written (3)\"" in essay
+    check "href=\"#excerpt.posts.pictures_fn-1\"" in essay
+    check "href=\"#excerpt.posts.every-prose-feature_fn-1\"" in essay
+    check essay.count("id=\"fn-1\"") == 1
+    # A feed summary is read on its own: its endnote links name the post
+    # page's endnotes, which carry the parser's IDs.
+    let feed = readFile(public / "feed.xml")
+    check "href=&quot;https://example.org/posts/pictures/#fn-1&quot;" in feed
+    check "excerpt." notin feed
+
+  test "two unwritten entries at one URL whose excerpts have endnotes fail, naming both":
+    # Entries of a collection with `output = false` are not written, so no
+    # output collision stops two of them from sharing a URL, and their
+    # excerpts would then carry the same IDs. The build names both entries.
+    let root = createTempDir("isonim-blog-excerpt-clash-", "")
+    defer: removeDir(root)
+    copyDir(conformanceFixture, root / "site")
+    writeFile(root / "site/site.toml", "theme = " & $(%(repoRoot / "themes/minimal")) & "\n" &
+      readFile(root / "site/site.toml") & "\n[collections.box]\noutput = false\n")
+    createDir(root / "site/collections/box")
+    for name in ["2024-01-01-same.md", "same.md"]:
+      writeFile(root / "site/collections/box" / name,
+        "---\ntitle: Same\n---\nA claim.[^n]\n\n[^n]: Its source.\n")
+    var message = ""
+    try: discard buildSite(root / "site", BuildOptions(outDir: root / "public", now: "@" & kitEpoch))
+    except BlogError as cause: message = cause.msg
+    checkpoint message
+    check "collections/box/same.md (/box/same/): its excerpt's heading and endnote IDs would " &
+      "repeat those of collections/box/2024-01-01-same.md (/box/same/); give one of them " &
+      "its own slug or permalink" in message
+    # With one of them given its own slug, the site builds.
+    writeFile(root / "site/collections/box/same.md",
+      "---\ntitle: Same\nslug: other\n---\nA claim.[^n]\n\n[^n]: Its source.\n")
+    discard buildSite(root / "site", BuildOptions(outDir: root / "public", now: "@" & kitEpoch))
+
   test "wrap_code = true marks the main element so code lines wrap":
     let root = createTempDir("isonim-blog-wide-content-", "")
     defer: removeDir(root)

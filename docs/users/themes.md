@@ -246,6 +246,16 @@ layout variant from fields of its own (`kind`, `status`, `credits`, ...).
 `listing.pageAssetUrl(site, page, page.image)` turns a front-matter image
 path into its fingerprinted URL.
 
+`page.content` and `page.excerpt` are rendered HTML. A layout may print any
+post's excerpt anywhere (a listing, "recent posts" beside a post, the
+post's own excerpt above its content): an excerpt's heading anchors and
+endnotes carry IDs of its own, `excerpt.<page path>_<id>` (for
+`/posts/hello/`, `excerpt.posts.hello_fn-1`), its endnote references and
+back-links lead to them on whatever page shows it, and its table regions
+are named apart from every page's content, so the page keeps unique IDs and
+names. A layout that prints the full `content` of several posts on one page
+repeats their IDs (`fn-1` in each); print their excerpts there instead.
+
 A theme carries interactive behaviour without JavaScript the way the
 fixture theme in `tests/fixtures/theme-capabilities/` does: state switched
 with radio inputs and `:has()`, popovers opened with `popovertarget`,

@@ -287,3 +287,34 @@ suite "check settings":
       checkpoint url
       check not skipsExternal(skip, url)
     check not skipsExternal(@[], "https://twitter.com/")
+
+  test "excerpt anchor prefixes are unique per page and never a heading anchor":
+    check excerptAnchorPrefix("/posts/hello/") == "excerpt.posts.hello_"
+    check excerptAnchorPrefix("/") == "excerpt._"
+    check excerptAnchorPrefix("/2019/old_post.html") == "excerpt.2019.old~5Fpost~2Ehtml_"
+    check excerptAnchorPrefix("/Notes/é/") == "excerpt.Notes.~C3~A9_"
+    # Paths a naive encoding would merge stay apart: `/` and `-`, `/` and
+    # `.`, and an underscore that would end the prefix early.
+    let urls = ["/a-b/", "/a/b/", "/a.b/", "/a_b/", "/a/b_/", "/a~2Eb/"]
+    var prefixes: seq[string]
+    for url in urls:
+      let prefix = excerptAnchorPrefix(url)
+      check prefix notin prefixes
+      check prefix.count('_') == 1 and prefix.endsWith("_")
+      prefixes.add prefix
+    # Heading slugs are [a-z0-9-]; the `.` keeps a prefix from being one.
+    check '.' in excerptAnchorPrefix("/")
+
+  test "an excerpt's own links stay in-page; feeds get the parser's IDs back":
+    let prefix = excerptAnchorPrefix("/posts/hello/")
+    let rendered = "<p>A note<sup id=\"" & prefix & "fnref-1\"><a href=\"/posts/hello/#" & prefix &
+      "fn-1\">1</a></sup> and <a href=\"/posts/hello/#setup\">setup</a>.</p><li id=\"" & prefix &
+      "fn-1\"><a href=\"/posts/hello/#" & prefix & "fnref-1\">↩</a></li>"
+    let page = inPageExcerptLinks(rendered, prefix)
+    check page == "<p>A note<sup id=\"" & prefix & "fnref-1\"><a href=\"#" & prefix &
+      "fn-1\">1</a></sup> and <a href=\"/posts/hello/#setup\">setup</a>.</p><li id=\"" & prefix &
+      "fn-1\"><a href=\"#" & prefix & "fnref-1\">↩</a></li>"
+    # Text that merely mentions the prefix is not a link.
+    check inPageExcerptLinks("<p>#" & prefix & "fn-1</p>", prefix) == "<p>#" & prefix & "fn-1</p>"
+    check withoutExcerptAnchors(page, prefix) == "<p>A note<sup id=\"fnref-1\"><a href=\"#fn-1\">1</a>" &
+      "</sup> and <a href=\"/posts/hello/#setup\">setup</a>.</p><li id=\"fn-1\"><a href=\"#fnref-1\">↩</a></li>"

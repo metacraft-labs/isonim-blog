@@ -50,7 +50,11 @@ proc feedEntry(site: Site; post: Page): FeedEntry =
   result = FeedEntry(title: post.title, url: url, published: post.date,
     updated: post.updated, categories: post.tags & post.categories)
   if site.config.fullContentFeeds: result.contentHtml = absoluteHtmlUrls(post.content, url)
-  else: result.summary = absoluteHtmlUrls(post.excerpt, url)
+  else:
+    # The summary is read on its own, so its endnote links lead to the
+    # post page's endnotes, not to the excerpt's own (`withoutExcerptAnchors`).
+    result.summary = absoluteHtmlUrls(withoutExcerptAnchors(post.excerpt,
+      excerptAnchorPrefix(post.url)), url)
 
 proc buildFeed(site: Site; posts: openArray[Page]; title, homeUrl, feedUrl: string): Feed =
   result = Feed(title: title, subtitle: site.config.description, siteUrl: homeUrl,

@@ -632,3 +632,46 @@ proc checkCollisions*(pages: openArray[Page]) =
     while '/' in parent:
       parent = parent[0..<parent.rfind('/')]
       if owners.hasKey(parent): fail("output collision: " & owners[parent] & " and " & source)
+
+proc excerptAnchorPrefix*(pageUrl: string): string =
+  ## The prefix of every heading, endnote and reference ID in the excerpt of
+  ## the page at `pageUrl`. The parser's IDs (`background`, `fn-1`,
+  ## `fnref-1`) are unique within one document only, and an excerpt is a
+  ## second rendering of the start of its post that layouts print beside
+  ## other excerpts and beside a post's content, so each excerpt gets its
+  ## own prefix, made from its URL: `/posts/hello/` gives
+  ## `excerpt.posts.hello_`. URL path letters, digits and `-` are kept, `/`
+  ## becomes `.`, and every other byte `~` and two hex digits, so no two
+  ## URLs give the same prefix, the prefix never contains `_` before its
+  ## end, and it never looks like a heading anchor (which has no `.`).
+  result = "excerpt."
+  for c in pageUrl.strip(chars = {'/'}):
+    case c
+    of 'a' .. 'z', 'A' .. 'Z', '0' .. '9', '-': result.add c
+    of '/': result.add '.'
+    else: result.add '~' & toHex(ord(c), 2)
+  result.add '_'
+
+proc inPageExcerptLinks*(html, prefix: string): string =
+  ## `html` with every link to one of the excerpt's own IDs (those that
+  ## start with `prefix`) made a bare `#fragment` again, after its
+  ## page-relative references were made root-relative: an excerpt's endnote
+  ## references and back-links lead to its own endnotes and references on
+  ## whatever page shows it.
+  result = html
+  let marker = "#" & prefix
+  var at = result.find(marker)
+  while at >= 0:
+    let quote = result.rfind('"', last = at - 1)
+    if quote >= 5 and result[quote - 5 .. quote - 1] == "href=" and
+        '"' notin result[quote + 1 ..< at]:
+      result.delete(quote + 1 .. at - 1)
+      at = quote + 1
+    at = result.find(marker, at + 1)
+
+proc withoutExcerptAnchors*(html, prefix: string): string =
+  ## An excerpt with its own anchor prefix removed again: for a feed, whose
+  ## summary is read on its own and whose links the feed makes absolute,
+  ## the excerpt's endnote links then lead to the endnotes of the post's
+  ## page (`fn-1`), which carry the parser's IDs.
+  html.replace("id=\"" & prefix, "id=\"").replace("\"#" & prefix, "\"#")

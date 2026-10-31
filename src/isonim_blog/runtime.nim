@@ -531,10 +531,16 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   # its table-region names and caption IDs. Listing pages join excerpts of
   # many posts, in many combinations, so every excerpt is rendered through
   # one scope for the whole site: any listing then holds unique names and
-  # IDs. A layout may also show a post's excerpt beside its content, so the
-  # excerpt avoids the content's names too, and its IDs are prefixed.
+  # IDs. A layout may also show an excerpt beside a post's content (its own
+  # post's, or another's: layouts receive `site.posts`), so the excerpts
+  # avoid the names and IDs of every page's content (`contents`), and are
+  # rendered after all of them. An excerpt's heading, endnote and reference
+  # IDs carry its own prefix (`excerptAnchorPrefix`), so they repeat neither
+  # its post's content nor another excerpt.
   let excerpts = newProsePageScope(idPrefix = "excerpt_")
-  for page in site.pages.mitems:
+  let contents = newProsePageScope()
+  var docs = newSeq[MarkdownDoc](site.pages.len)
+  for n, page in site.pages.mpairs:
     let source = page.source
     let doc =
       try:
@@ -549,18 +555,38 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
     let content = newProsePageScope()
     page.content = renderProseHtml(doc, content)
     if page.toc: page.content = renderTocHtml(doc.headingTree) & page.content
+    contents.reserve(content)
+    docs[n] = doc
+    for rewrite in rewrites:
+      page.content = page.content.replace("\"" & rewrite.original & "\"", "\"" & rewrite.hashed & "\"")
+  # The page whose excerpt first took each prefix. Pages that are written
+  # have different URLs, and so different prefixes, but entries of a
+  # collection with `output = false` are not written, and two of them may
+  # share a URL.
+  var prefixOwners = initTable[string, string]()
+  for n, page in site.pages.mpairs:
+    let prefix = excerptAnchorPrefix(page.url)
     # A listing shows the excerpt under the post's title, so a table before
     # the excerpt's own first heading is named after the title.
     if page.excerpt.len == 0:
-      page.excerpt = renderProseHtml(doc.excerpt, excerpts, content, heading = page.title)
+      try:
+        page.excerpt = renderProseHtml(docs[n].excerpt, excerpts, contents,
+          heading = page.title, anchorPrefix = prefix)
+      except ValueError as cause:
+        if prefixOwners.hasKey(prefix):
+          fail(page.source & " (" & page.url & "): its excerpt's heading and endnote IDs would repeat those of " &
+            prefixOwners[prefix] & "; give one of them its own slug or permalink")
+        fail(page.source & ": excerpt: " & cause.msg)
+    if not prefixOwners.hasKey(prefix): prefixOwners[prefix] = page.source & " (" & page.url & ")"
     # Excerpts are shown on listing pages and in feeds, so their links to
     # bundle resources are rewritten exactly like the full content's.
     for rewrite in rewrites:
-      page.content = page.content.replace("\"" & rewrite.original & "\"", "\"" & rewrite.hashed & "\"")
       page.excerpt = page.excerpt.replace("\"" & rewrite.original & "\"", "\"" & rewrite.hashed & "\"")
     # A page-relative reference (`../other/`, `#heading`) in an excerpt would
-    # point elsewhere on a listing page, so excerpts carry root-relative ones.
-    page.excerpt = rootRelativeHtml(page.excerpt, page.url)
+    # point elsewhere on a listing page, so excerpts carry root-relative ones,
+    # except the links between the excerpt's own endnotes and references,
+    # which the page showing the excerpt carries too.
+    page.excerpt = inPageExcerptLinks(rootRelativeHtml(page.excerpt, page.url), prefix)
   # Layouts receive the same rendered records through all navigation views.
   site.posts.setLen(0)
   site.collections.clear()

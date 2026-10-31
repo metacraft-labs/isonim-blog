@@ -435,7 +435,9 @@ one:
 
 On listing pages, which show the excerpts of several posts, each excerpt's
 tables are named after the post's title unless the excerpt has a heading of
-its own, and the names stay different across all the excerpts. Give a
+its own, and the names stay different across all the excerpts and from
+every post's content, so an excerpt keeps its name apart on any page that
+prints it (see [Themes](themes.md#layouts-and-what-layouts-see)). Give a
 table a caption when the reader should know what it holds before reading
 it; the generated names are a fallback.
 
