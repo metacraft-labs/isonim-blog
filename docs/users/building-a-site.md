@@ -408,7 +408,14 @@ Quarto uses it too, so the same file reads the same in those tools:
 : Releases so far
 ```
 
-The marker is removed and the rest of the paragraph, inline markup
+A cell holds inline Markdown, as in
+[GFM](https://github.github.com/gfm/#tables-extension-): code, links,
+autolinks and struck-through text render in cells whether or not maths is
+on, and a link in a cell is checked like any other. A pipe ends the cell,
+even inside backticks; write `\|` for a pipe in a cell, inside code too.
+With maths on, a formula keeps its pipes (`$|x|$`).
+
+The caption's marker is removed and the rest of the paragraph, inline markup
 included, becomes the table's `<caption>`. A caption above the table wins
 over one below it, and a caption paragraph between two tables belongs to
 the first. A paragraph that starts with `Table:` but is not next to a table
