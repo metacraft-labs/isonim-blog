@@ -527,20 +527,32 @@ proc exportBlog*(root, output: string; layouts: openArray[LayoutEntry];
   let keptScripts = applyScriptPolicy(site.config.scriptPolicy, scripts)
   var routes = initTable[string, string]()
   for page in site.pages: routes[page.source] = page.url
+  # Each page's content is a page of its own, so it gets a fresh scope for
+  # its table-region names and caption IDs. Listing pages join excerpts of
+  # many posts, in many combinations, so every excerpt is rendered through
+  # one scope for the whole site: any listing then holds unique names and
+  # IDs. A layout may also show a post's excerpt beside its content, so the
+  # excerpt avoids the content's names too, and its IDs are prefixed.
+  let excerpts = newProsePageScope(idPrefix = "excerpt_")
   for page in site.pages.mitems:
     let source = page.source
     let doc =
       try:
+        # Table captions use Pandoc's `Table: …` / `: …` paragraph syntax.
         parseMarkdownDocWithHooks(hooks, page.body, page.source,
           resolveContentPath = proc(path: string): string =
             if not routes.hasKey(path): fail(source & ": missing content target " & path)
-            routes[path], firstLine = page.bodyLine)
+            routes[path], firstLine = page.bodyLine, tableCaptions = true)
       except BlogError: raise
       except ValueError as cause: fail(withToolHint(cause.msg))
     checkImageAlt(doc, source)
-    page.content = renderProseHtml(doc)
+    let content = newProsePageScope()
+    page.content = renderProseHtml(doc, content)
     if page.toc: page.content = renderTocHtml(doc.headingTree) & page.content
-    if page.excerpt.len == 0: page.excerpt = renderProseHtml(doc.excerpt)
+    # A listing shows the excerpt under the post's title, so a table before
+    # the excerpt's own first heading is named after the title.
+    if page.excerpt.len == 0:
+      page.excerpt = renderProseHtml(doc.excerpt, excerpts, content, heading = page.title)
     # Excerpts are shown on listing pages and in feeds, so their links to
     # bundle resources are rewritten exactly like the full content's.
     for rewrite in rewrites:

@@ -392,6 +392,46 @@ directory (`ISONIM_BLOG_OG_FONTS`). Both run with fixed settings, so the same
 inputs give the same bytes; `isonim-blog build` keeps encoded variants under
 `build/isonim-blog/images/` and reuses them.
 
+## Tables and captions
+
+Tables are GitHub-flavoured Markdown tables. A caption is a paragraph that
+starts with `Table:` (or `table:`, or a colon and a space), directly above
+or below the table, with or without a blank line between. The syntax is
+Pandoc's (<https://pandoc.org/MANUAL.html#extension-table_captions>), and
+Quarto uses it too, so the same file reads the same in those tools:
+
+```markdown
+| Release | Date       |
+| ------- | ---------- |
+| 1.0     | 2024-01-10 |
+
+: Releases so far
+```
+
+The marker is removed and the rest of the paragraph, inline markup
+included, becomes the table's `<caption>`. A caption above the table wins
+over one below it, and a caption paragraph between two tables belongs to
+the first. A paragraph that starts with `Table:` but is not next to a table
+stays an ordinary paragraph, as does `:` followed by anything but a space
+(so `:smile:` is safe).
+
+Every table sits in a focusable scroll region (see
+[Themes](themes.md#long-code-lines-and-wide-tables)), and a screen reader
+announces that region by name, so every region on a page gets a different
+one:
+
+- a captioned table's region is named by its caption;
+- a table without a caption is named after the nearest heading before it,
+  `Table: Installation`, or `Table` when no heading comes first;
+- a name that is already taken on the page gets a number: `Table (2)`,
+  `Installation (2)`.
+
+On listing pages, which show the excerpts of several posts, each excerpt's
+tables are named after the post's title unless the excerpt has a heading of
+its own, and the names stay different across all the excerpts. Give a
+table a caption when the reader should know what it holds before reading
+it; the generated names are a fallback.
+
 ## Maths and diagrams
 
 With `math = true` in `[markdown]`, maths is rendered at build time to

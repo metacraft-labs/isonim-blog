@@ -21,15 +21,40 @@ and the dark scheme) and uses no JavaScript.
 ## Long code lines and wide tables
 
 The Markdown renderer emits every fenced code block as `<pre tabindex="0">`
-and wraps every table in a scroll region:
+and wraps every table in a named scroll region. A captioned table (see
+[Tables and captions](building-a-site.md#tables-and-captions)) is named by
+its caption; any other by `aria-label`, after the heading before it:
 
 ```html
-<div class="table-scroll" role="region" tabindex="0" aria-label="Table">
+<div
+  class="table-scroll"
+  role="region"
+  tabindex="0"
+  aria-labelledby="table_caption-1"
+>
+  <table>
+    <caption id="table_caption-1">
+      Releases so far
+    </caption>
+    ...
+  </table>
+</div>
+<div
+  class="table-scroll"
+  role="region"
+  tabindex="0"
+  aria-label="Table: Installation"
+>
   <table>
     ...
   </table>
 </div>
 ```
+
+A theme styles `caption` like any other text; the minimal theme sets it
+above the table in the muted colour of figure captions. The `id` is
+generated and may change when the page's tables change, so do not style or
+link to it.
 
 A theme can therefore let a code line or a table that is wider than the
 column scroll inside its own box (`overflow-x: auto` on `pre` and
@@ -267,7 +292,12 @@ content feature, with no layouts of its own) with the theme and checks that:
   invalid feed;
 - in Chromium, axe-core finds no WCAG 2.0, 2.1 or 2.2 level A or AA
   violation on any page, in the light and the dark scheme, at 360 and 1280
-  pixels wide, and no page scrolls sideways at 360 pixels. Its summary
+  pixels wide, and no page scrolls sideways at 360 pixels. It also runs
+  axe's `landmark-unique` rule: landmarks of the same role on one page
+  (two `nav` elements, or the fixture's several tables on one post and in
+  the excerpts of the post list) must have different names, as the WAI-ARIA
+  Authoring Practices ask
+  (<https://www.w3.org/WAI/ARIA/apg/practices/landmark-regions/>). Its summary
   counts the boxes that scroll sideways inside the pages at 360 pixels
   (`pre 2, div.table-scroll 2` for the minimal theme), so you can see
   whether the theme scrolls or wraps wide content;

@@ -9,7 +9,14 @@ image: hero.png
 image_alt: A green hill under a blue sky with a yellow sun
 ---
 
-A post bundle keeps its images next to its text.
+A post bundle keeps its images next to its text:
+
+| File       | Format |
+| ---------- | ------ |
+| hero.png   | PNG    |
+| figure.svg | SVG    |
+
+<!--more-->
 
 ![A green hill under a blue sky with a yellow sun](hero.png)
 

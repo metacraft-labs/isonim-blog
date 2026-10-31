@@ -18,7 +18,13 @@
 // - at 360 and at 1280 pixels, the pinned axe-core
 //   (https://github.com/dequelabs/axe-core) reports no violation of its
 //   WCAG 2.0, 2.1 and 2.2 level A and AA rules. Colour contrast is among
-//   them, so both schemes are checked against SC 1.4.3 and 1.4.11.
+//   them, so both schemes are checked against SC 1.4.3 and 1.4.11. Its
+//   best-practice rule `landmark-unique` runs too: a page that repeats a
+//   landmark role must give each one a different name (WAI-ARIA Authoring
+//   Practices, https://www.w3.org/WAI/ARIA/apg/practices/landmark-regions/),
+//   or a screen reader's list of landmarks cannot tell them apart. The
+//   renderer's table regions are landmarks, so several tables on one page,
+//   or on a listing that joins several excerpts, must have distinct names.
 //
 // - every page is served with the response headers of the built site's
 //   `_headers` file, applied as Cloudflare Pages applies them, so the
@@ -57,6 +63,10 @@ import { join, normalize, extname, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+// Rules outside those tags that the kit runs as well. axe runs a rule that
+// `rules` enables even when `runOnly` selects by tag
+// (https://github.com/dequelabs/axe-core/blob/develop/doc/API.md#options-parameter).
+const AXE_EXTRA_RULES = ["landmark-unique"];
 const WIDTHS = [360, 1280];
 const NARROW = 360;
 const SCHEMES = ["light", "dark"];
@@ -178,22 +188,26 @@ async function axeRun(page, source) {
   // Evaluated by the DevTools protocol, which the page's policy does not
   // govern; a script element would be refused by script-src 'none'.
   await page.evaluate(source);
-  return await page.evaluate(async (tags) => {
-    const result = await globalThis.axe.run(document, {
-      runOnly: { type: "tag", values: tags },
-      resultTypes: ["violations"],
-    });
-    return {
-      version: globalThis.axe.version,
-      violations: result.violations.map((v) => ({
-        id: v.id,
-        impact: v.impact,
-        help: v.help,
-        nodes: v.nodes.length,
-        target: v.nodes.length > 0 ? String(v.nodes[0].target) : "",
-      })),
-    };
-  }, AXE_TAGS);
+  return await page.evaluate(
+    async ({ tags, extra }) => {
+      const result = await globalThis.axe.run(document, {
+        runOnly: { type: "tag", values: tags },
+        rules: Object.fromEntries(extra.map((id) => [id, { enabled: true }])),
+        resultTypes: ["violations"],
+      });
+      return {
+        version: globalThis.axe.version,
+        violations: result.violations.map((v) => ({
+          id: v.id,
+          impact: v.impact,
+          help: v.help,
+          nodes: v.nodes.length,
+          target: v.nodes.length > 0 ? String(v.nodes[0].target) : "",
+        })),
+      };
+    },
+    { tags: AXE_TAGS, extra: AXE_EXTRA_RULES },
+  );
 }
 
 // The horizontal overflow of the page and the outermost elements that

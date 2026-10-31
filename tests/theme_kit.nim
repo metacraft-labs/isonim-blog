@@ -23,9 +23,10 @@
 ## 8. every page links the theme's stylesheets, and they exist;
 ## 9. `isonim-blog check` finds nothing wrong in the production build
 ##    (links and anchors written by the layouts, alt text, feeds);
-## 10. in Chromium, with axe-core: no WCAG 2.0/2.1/2.2 A or AA violation on
-##    any page, in the light and the dark scheme, at 360 and 1280 pixels
-##    wide; and no horizontal scroll at 360 pixels. The summary names the
+## 10. in Chromium, with axe-core: no WCAG 2.0/2.1/2.2 A or AA violation,
+##    and no repeated landmark name (axe's `landmark-unique`), on any page,
+##    in the light and the dark scheme, at 360 and 1280 pixels wide; and no
+##    horizontal scroll at 360 pixels. The summary names the
 ##    boxes that scroll sideways inside the pages at 360 pixels (code
 ##    blocks, table wrappers), so whether a theme scrolls or wraps wide
 ##    content is visible; axe requires every such box to be focusable. Every
@@ -270,7 +271,8 @@ proc runThemeKit*(theme: string; work: string; browser = true): KitReport =
   result.add "isonim-blog check (links, anchors, alt text, feeds)", findings
   if browser:
     let (problems, summary) = browserChecks(output, pages)
-    result.add "WCAG 2.2 AA (axe-core) in both schemes; no horizontal scroll at 360px; " &
+    result.add "WCAG 2.2 AA and unique landmark names (axe-core) in both schemes; " &
+      "no horizontal scroll at 360px; " &
       "no Content-Security-Policy violation",
       (if problems.len > 0: problems else: summary.splitLines()), passed = problems.len == 0
 

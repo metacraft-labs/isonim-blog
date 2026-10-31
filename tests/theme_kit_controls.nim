@@ -12,8 +12,11 @@
 ## (only a browser that enforces the generated policy sees it); a layout that
 ## emits a style attribute, which the policy would block. A layout's `<style>`
 ## element, which the policy allows by its hash, must pass in the browser.
-## Diagram labels a theme's dark palette leaves unreadable and formulas a
-## theme hides must fail; the
+## A layout that repeats a landmark with the same name must fail axe's
+## landmark-unique rule, which the kit runs beside the WCAG rules (the
+## fixture's several tables on one post, and the excerpts joined on the post
+## list, must pass it). Diagram labels a theme's dark palette leaves
+## unreadable and formulas a theme hides must fail; the
 ## fixture's maths and diagrams, rendered at build time under the generated
 ## policy, must be laid out with the counts the kit reports.
 ##
@@ -159,6 +162,16 @@ control("a theme that hides formulas fails", proc(theme: string) =
   let css = theme / "assets/minimal.css"
   writeFile(css, readFile(css) & "\nmath { display: none; }\n"),
   expectPass = false, present = ["FAIL WCAG 2.2 AA", "(light, 360px): a formula is not laid out"])
+control("a layout that repeats a landmark name fails axe landmark-unique", proc(theme: string) =
+  # Not a WCAG A/AA rule: the kit runs it beside them. The tables of the
+  # fixture (three on one post, two excerpts on the post list) pass it in
+  # the positive control, so they are named apart.
+  replaceIn(theme / "layouts/base.nim", "    raw footer\n",
+    "    raw footer\n    raw \"<nav aria-label=\\\"More\\\"><a href=\\\"/\\\">Home</a></nav>" &
+    "<nav aria-label=\\\"More\\\"><a href=\\\"/about/\\\">About</a></nav>\"\n"),
+  expectPass = false, present = ["FAIL WCAG 2.2 AA and unique landmark names",
+    "(light, 360px): axe landmark-unique", "(dark, 1280px): axe landmark-unique"],
+  absent = ["axe color-contrast"])
 control("a theme without a post layout fails naming it", proc(theme: string) =
   removeFile(theme / "layouts/post.nim"),
   expectPass = false, present = ["FAIL required layouts", "missing layouts/post.nim"])

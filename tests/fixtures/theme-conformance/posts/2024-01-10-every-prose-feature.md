@@ -15,6 +15,11 @@ credits: [Text by the example author, Review by a second example author]
 This post uses every block and inline feature of the Markdown dialect, so a
 theme can show how it styles each one.[^why]
 
+| Part   | Shows                            |
+| ------ | -------------------------------- |
+| Text   | inline markup, lists and quotes  |
+| Blocks | code, tables, maths and diagrams |
+
 <!--more-->
 
 ## Inline text
@@ -63,6 +68,8 @@ echo greet("world")
 | Code      | backticks  | inline and fenced                  |
 | Tables    | pipes      | scroll inside themselves if narrow |
 | Footnotes | `[^label]` | numbered in order of reference     |
+
+: How three features are written
 
 A wide table must fit a narrow screen too:
 

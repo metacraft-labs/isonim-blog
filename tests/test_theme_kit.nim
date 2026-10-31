@@ -13,7 +13,7 @@
 ##   configuration.
 ##
 ## Real builds with the real compiler throughout; no test doubles.
-import std/[unittest, json, strutils, sequtils]
+import std/[unittest, json, strutils, sequtils, algorithm]
 import isonim_blog
 import ./site_helpers
 import ./theme_kit
@@ -190,14 +190,97 @@ suite "the minimal theme: long code lines and wide tables":
           check wrapper.getOrDefault("class") == "table-scroll"
           check wrapper.getOrDefault("role") == "region"
           check wrapper.getOrDefault("tabindex") == "0"
-          check wrapper.getOrDefault("aria-label") == "Table"
     # Vacuity guard: the fixture's long code lines and wide table are there.
     check blocks == 3
-    check tables == 2
+    check tables == 3
     let css = stylesheetText(public, "posts/code-heavy/index.html")
     check "white-space: pre;\n  overflow-wrap: normal;\n  overflow-x: auto;" in css
     check ".table-scroll {\n  max-width: 100%;\n  overflow-x: auto;\n}" in css
     check ".wrap-code pre {\n  white-space: pre-wrap;" in css
+
+  test "every table region on a page has its own name, from its caption or heading":
+    # A region landmark needs a name, and repeated ones need different
+    # names (axe-core's landmark-unique; the browser half runs it in
+    # `just test-theme`). Listing pages join the excerpts of several posts,
+    # each rendered alone, so they are checked as well as the posts.
+    let root = createTempDir("isonim-blog-table-names-", "")
+    defer: removeDir(root)
+    let public = buildFixture(root, "")
+    proc regions(page: string): seq[string] =
+      ## Each table region's name source, in document order:
+      ## `label:<aria-label>` or `caption:<caption text>`; and a check that
+      ## every aria-labelledby names exactly one element, a caption.
+      let elements = htmlElements(public / page, "div", "caption", "table")
+      let html = readFile(public / page)
+      for element in elements:
+        if element["<tag>"] != "div" or element.getOrDefault("class") != "table-scroll": continue
+        check element.getOrDefault("role") == "region"
+        if element.hasKey("aria-labelledby"):
+          check not element.hasKey("aria-label")
+          let id = element["aria-labelledby"]
+          var targets = 0
+          for other in elements:
+            if other.getOrDefault("id") == id:
+              inc targets
+              check other["<tag>"] == "caption"
+          check targets == 1
+          check html.count("id=\"" & id & "\"") == 1
+          let start = html.find("<caption id=\"" & id & "\">") + 15 + id.len
+          result.add "caption:" & html[start ..< html.find("</caption>", start)]
+        else:
+          check element.getOrDefault("aria-label").len > 0
+          result.add "label:" & element["aria-label"]
+    var pages: seq[string]
+    for file in walkDirRec(public):
+      if file.endsWith(".html"): pages.add relativePath(file, public)
+    var withTables = 0
+    var listings: seq[string]
+    for page in pages:
+      let names = regions(page)
+      if names.len > 0: inc withTables
+      if names.len > 1 and page != "posts/every-prose-feature/index.html".replace('/', DirSep): listings.add page
+      var seen: seq[string]
+      for name in names:
+        let key = name.split(':', 1)[1].toLowerAscii()
+        if key in seen: checkpoint(page & " repeats the region name " & name)
+        check key notin seen
+        seen.add key
+    check regions("posts/every-prose-feature/index.html") == @["label:Table",
+      "caption:How three features are written", "label:Table: Table"]
+    check regions("posts/pictures/index.html") == @["label:Table"]
+    # The first page of the post list joins two excerpts with an uncaptioned
+    # table before any heading, named "Table" on each post's own page. On
+    # the listing each excerpt sits under its post's title, and is named
+    # after it.
+    check listings == @["posts" & DirSep & "index.html"]
+    check sorted(regions(listings[0])) == @["label:Table: Every prose feature",
+      "label:Table: Pictures and figures"]
+    # Vacuity guard: the post pages and the listing were seen.
+    check withTables == 3
+
+  test "an excerpt printed beside its own post's content keeps its table names apart":
+    # The capability theme's post layout prints the excerpt and the full
+    # content on one page. An excerpt whose captioned table is also in the
+    # content would repeat the caption's name there, unless the excerpt is
+    # named apart from its own post's content.
+    let root = createTempDir("isonim-blog-excerpt-names-", "")
+    defer: removeDir(root)
+    copyDir(conformanceFixture, root / "site")
+    writeFile(root / "site/site.toml", "theme = " &
+      $(%(repoRoot / "tests/fixtures/theme-capabilities")) & "\n" & readFile(root / "site/site.toml"))
+    let post = root / "site/posts/2024-02-14-pictures/index.md"
+    let source = readFile(post)
+    check "| figure.svg | SVG    |\n\n<!--more-->" in source
+    writeFile(post, source.replace("<!--more-->", "Table: Files in the bundle\n\n<!--more-->"))
+    let public = root / "public"
+    discard buildSite(root / "site", BuildOptions(drafts: true, outDir: public, now: "@" & kitEpoch))
+    var names: seq[string]
+    for element in htmlElements(public / "posts/pictures/index.html", "div"):
+      if element.getOrDefault("class") != "table-scroll": continue
+      names.add(if element.hasKey("aria-labelledby"): "caption " & element["aria-labelledby"]
+                else: "label " & element.getOrDefault("aria-label"))
+    # The excerpt (printed first) is numbered; the content keeps the caption.
+    check names == @["label Files in the bundle (2)", "caption table_caption-1"]
 
   test "wrap_code = true marks the main element so code lines wrap":
     let root = createTempDir("isonim-blog-wide-content-", "")
