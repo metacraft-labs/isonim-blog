@@ -193,9 +193,18 @@ suite "the minimal theme: long code lines and wide tables":
     # Vacuity guard: the fixture's long code lines and wide table are there.
     check blocks == 3
     check tables == 3
+    # Display formulas, one of them wider than 360px, sit in focusable
+    # groups; the inline one does not.
+    let essay = readFile(public / "posts/every-prose-feature/index.html")
+    check essay.count("<math ") == 3
+    check essay.count("<math display=\"block\"") == 2
+    check essay.count("<span class=\"math-scroll\" role=\"group\" tabindex=\"0\" " &
+      "aria-label=\"Formula\"><math display=\"block\"") == 2
     let css = stylesheetText(public, "posts/code-heavy/index.html")
     check "white-space: pre;\n  overflow-wrap: normal;\n  overflow-x: auto;" in css
     check ".table-scroll {\n  max-width: 100%;\n  overflow-x: auto;\n}" in css
+    check ".math-scroll {\n  display: block;\n  max-width: 100%;\n  margin: 0 0 1.125rem;\n" &
+      "  overflow-x: auto;" in css
     check ".wrap-code pre {\n  white-space: pre-wrap;" in css
 
   test "every table region on a page has its own name, from its caption or heading":

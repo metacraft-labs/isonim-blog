@@ -83,7 +83,22 @@ printed, code lines and table cells always wrap.
 
 Maths arrives as MathML (`<math>`, with `display="block"` for display
 formulas), which the browser lays out with its own maths fonts; a theme may
-give block formulas spacing. Diagrams arrive as inline
+give block formulas spacing. MathML does not break a formula across lines,
+so every display formula comes wrapped in a focusable group, like a table
+in its region:
+
+```html
+<span class="math-scroll" role="group" tabindex="0" aria-label="Formula">
+  <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">...</math>
+</span>
+```
+
+A theme gives `.math-scroll` `display: block` and `overflow-x: auto`, so a
+formula wider than the column scrolls inside it instead of widening the
+page, and stays reachable from the keyboard; the minimal theme does. A
+theme that scrolls the `math` element itself, or leaves the wrapper
+unscrolled, fails the conformance kit, whose fixture has a formula wider
+than 360 pixels. Diagrams arrive as inline
 `<svg class="isonim-diagram">`. Their colours are four CSS custom properties
 the theme sets on that element or an ancestor:
 
@@ -309,10 +324,12 @@ content feature, with no layouts of its own) with the theme and checks that:
   Authoring Practices ask
   (<https://www.w3.org/WAI/ARIA/apg/practices/landmark-regions/>). Its summary
   counts the boxes that scroll sideways inside the pages at 360 pixels
-  (`pre 2, div.table-scroll 2` for the minimal theme), so you can see
+  (`div.table-scroll 2, pre 2, span.math-scroll 1` for the minimal theme),
+  so you can see
   whether the theme scrolls or wraps wide content;
 - in Chromium, the fixture's formulas are laid out (a fraction's numerator
-  above its denominator) and every diagram label has at least 4.5:1
+  above its denominator, and a display formula wider than its box scrolls
+  only in a box the keyboard can reach) and every diagram label has at least 4.5:1
   contrast against the shape under it, in both schemes (axe does not judge
   text inside SVG); the summary counts the formulas and diagram labels seen;
 - in Chromium, every page is served with the headers of the built

@@ -37,6 +37,10 @@
 //   both widths, the browser must really lay them out: every MathML
 //   `<math>` has a box, and every `<mfrac>` stacks its numerator above its
 //   denominator (MathML Core layout, https://www.w3.org/TR/mathml-core/#fractions-mfrac);
+//   a display formula wider than its box scrolls only in a box the
+//   keyboard reaches (the renderer's focusable `.math-scroll`), so with
+//   the page check above a wide formula neither widens the page nor
+//   leaves the keyboard behind;
 //   every inline diagram SVG has a box, and every label in it is painted in
 //   a colour with at least 4.5:1 contrast (WCAG 2.2 SC 1.4.3) against the
 //   shape under it, or the page background. axe does not judge text inside
@@ -275,6 +279,7 @@ async function generated(page) {
       present: 0,
       hidden: 0,
       maths: 0,
+      displays: 0,
       fractions: 0,
       diagrams: 0,
       labels: 0,
@@ -322,6 +327,27 @@ async function generated(page) {
       counts.maths += 1;
       if (!shown(math))
         problems.push(`a formula is not laid out: ${math.textContent.trim()}`);
+      // A display formula wider than the column (MathML does not break it)
+      // must scroll in a box the keyboard reaches, as axe requires of
+      // scrolling boxes (scrollable-region-focusable, WCAG 2.2 SC 2.1.1): the
+      // renderer wraps each one in a focusable `.math-scroll`, and a theme
+      // that scrolls the formula itself, or another box around it, fails.
+      if (math.getAttribute("display") === "block" && shown(math)) {
+        counts.displays += 1;
+        for (let el = math; el && el !== document.body; el = el.parentElement) {
+          const style = getComputedStyle(el);
+          if (
+            (style.overflowX === "auto" || style.overflowX === "scroll") &&
+            el.scrollWidth > el.clientWidth + 1 &&
+            el.tabIndex < 0
+          ) {
+            problems.push(
+              `a display formula scrolls in a box the keyboard cannot reach (${el.tagName.toLowerCase()}): ${math.textContent.trim()}`,
+            );
+            break;
+          }
+        }
+      }
     }
     for (const frac of document.querySelectorAll("math mfrac")) {
       const math = frac.closest("math");
@@ -403,6 +429,7 @@ async function main() {
       present: 0,
       hidden: 0,
       maths: 0,
+      displays: 0,
       fractions: 0,
       diagrams: 0,
       labels: 0,

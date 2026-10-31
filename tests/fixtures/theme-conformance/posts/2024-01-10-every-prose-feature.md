@@ -86,6 +86,12 @@ $$
 \sum_{k=1}^{n} k = \frac{n(n+1)}{2}
 $$
 
+A display formula wider than a narrow screen scrolls inside its own box:
+
+$$
+f(x) = a_0 + a_1 x + a_2 x^2 + a_3 x^3 + a_4 x^4 + a_5 x^5 + a_6 x^6 + a_7 x^7 + a_8 x^8 + a_9 x^9 + a_{10} x^{10}
+$$
+
 A diagram in D2:
 
 ```d2

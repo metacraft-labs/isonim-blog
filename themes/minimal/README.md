@@ -17,11 +17,9 @@ headings, paragraphs, links, lists, task lists, quotations, inline and fenced
 code, tables, figures and captions, footnotes, asides, maths and diagrams.
 The footer links the RSS and Atom feeds; a tag page links its own feed.
 
-Wide code and tables scroll inside their own boxes and diagrams scale down to
-the column, so the page does not scroll sideways on a 360-pixel screen. A
-display formula wider than the column is the exception: MathML does not
-shrink, and the renderer gives formulas no focusable box to scroll in, so
-such a formula widens the page. A print stylesheet
+Wide code, tables and display formulas scroll inside their own focusable
+boxes and diagrams scale down to the column, so the page does not scroll
+sideways on a 360-pixel screen. A print stylesheet
 drops the site chrome and spells out external links.
 
 ## Configuration

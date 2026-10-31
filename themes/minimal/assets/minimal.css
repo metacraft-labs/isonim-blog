@@ -454,11 +454,23 @@ del {
 }
 
 /* Maths (MathML from KaTeX) and diagrams (inline SVG): block formulas on
- * their own line, diagrams scaled down to the column. */
+ * their own line, diagrams scaled down to the column. MathML does not break
+ * a formula, so a display formula wider than the column scrolls inside the
+ * renderer's focusable .math-scroll wrapper, as a wide table does; the
+ * overflow values are the ones KaTeX's documentation gives for scrolling
+ * display equations (https://katex.org/docs/issues). */
 math[display="block"] {
   display: block;
   max-width: 100%;
   padding: 0.25rem 0;
+}
+
+.math-scroll {
+  display: block;
+  max-width: 100%;
+  margin: 0 0 1.125rem;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .prose svg {
@@ -546,6 +558,10 @@ math[display="block"] {
   }
 
   .table-scroll {
+    overflow: visible;
+  }
+
+  .math-scroll {
     overflow: visible;
   }
 

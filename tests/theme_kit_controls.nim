@@ -18,11 +18,14 @@
 ## list, must pass it). Diagram labels a theme's dark palette leaves
 ## unreadable and formulas a theme hides must fail; the
 ## fixture's maths and diagrams, rendered at build time under the generated
-## policy, must be laid out with the counts the kit reports.
+## policy, must be laid out with the counts the kit reports. A wide display
+## formula whose box does not scroll must widen the page and fail, and one
+## that scrolls outside the renderer's focusable wrapper must fail.
 ##
 ## The shipped theme's handling of wide content is checked here too, in the
 ## browser: by default the fixture's long code lines and wide tables scroll
-## inside their own (focusable) boxes, and with `wrap_code = true` code
+## inside their own (focusable) boxes, as does its wide display formula,
+## and with `wrap_code = true` code
 ## wraps while tables still scroll. axe passing on a theme that merely
 ## wrapped everything would prove nothing about scroll boxes, so the counts
 ## the kit reports are asserted, not only its verdict.
@@ -99,11 +102,13 @@ control("a layout that emits a script fails the build", proc(theme: string) =
 control("by default, long code lines and wide tables scroll in focusable boxes", proc(theme: string) = discard,
   expectPass = true, present = ["PASS WCAG 2.2 AA"], absent = ["scrollable-region-focusable"],
   inspect = proc(output: string): seq[string] =
-    # The fixture has two code blocks and one table wider than 360px
-    # (posts/code-heavy, posts/every-prose-feature).
+    # The fixture has two code blocks, one table and one display formula
+    # wider than 360px (posts/code-heavy, posts/every-prose-feature).
     if scrollCount(output, "pre") < 2: result.add "code blocks scrolling: " & $scrollCount(output, "pre")
     if scrollCount(output, "div.table-scroll") < 1:
-      result.add "tables scrolling: " & $scrollCount(output, "div.table-scroll"))
+      result.add "tables scrolling: " & $scrollCount(output, "div.table-scroll")
+    if scrollCount(output, "span.math-scroll") != 1:
+      result.add "formulas scrolling: " & $scrollCount(output, "span.math-scroll"))
 control("wrap_code = true wraps code lines; wide tables still scroll", proc(theme: string) =
   replaceIn(theme / "theme.toml", "wrap_code = false", "wrap_code = true"),
   expectPass = true, present = ["PASS WCAG 2.2 AA"],
@@ -140,10 +145,10 @@ control("the fixture's maths and diagrams are laid out under the generated polic
   expectPass = true, present = ["PASS maths and diagrams are rendered at build time"],
   absent = ["Content-Security-Policy blocked", "the diagram label", "is not laid out"],
   inspect = proc(output: string): seq[string] =
-    # One page carries them: an inline and a display formula (one fraction)
-    # and a D2 and a Graphviz diagram with five labels, seen at two widths
-    # in two schemes.
-    if "maths and diagrams laid out: 8 formulas (4 fractions), 8 diagrams (20 labels); 0 hidden" notin output:
+    # One page carries them: an inline and two display formulas (one
+    # fraction) and a D2 and a Graphviz diagram with five labels, seen at
+    # two widths in two schemes.
+    if "maths and diagrams laid out: 12 formulas (4 fractions, 8 display), 8 diagrams (20 labels); 0 hidden" notin output:
       result.add "unexpected maths and diagram counts")
 control("diagram labels on white shapes in the dark scheme fail in the dark scheme only", proc(theme: string) =
   # The dark scheme's light labels on shapes and a background left white.
@@ -158,6 +163,18 @@ control("a theme that takes fractions out of MathML layout fails", proc(theme: s
   let css = theme / "assets/minimal.css"
   writeFile(css, readFile(css) & "\nmath mfrac { display: flex; }\n"),
   expectPass = false, present = ["FAIL WCAG 2.2 AA", "(light, 360px): a fraction is not stacked"])
+control("a wide display formula whose box does not scroll widens the page", proc(theme: string) =
+  let css = theme / "assets/minimal.css"
+  writeFile(css, readFile(css) & "\n.math-scroll { overflow: visible; }\n"),
+  expectPass = false, present = ["(light, 360px): scrolls horizontally by", "(dark, 360px): scrolls horizontally by"],
+  absent = ["(light, 1280px): scrolls horizontally by"])
+control("a display formula that scrolls itself, outside the focusable wrapper, fails", proc(theme: string) =
+  let css = theme / "assets/minimal.css"
+  writeFile(css, readFile(css) & "\n.math-scroll { overflow: visible; }\n" &
+    "math[display=\"block\"] { overflow-x: auto; }\n"),
+  expectPass = false, present = ["FAIL WCAG 2.2 AA",
+    "(light, 360px): a display formula scrolls in a box the keyboard cannot reach (math)"],
+  absent = ["scrolls horizontally by"])
 control("a theme that hides formulas fails", proc(theme: string) =
   let css = theme / "assets/minimal.css"
   writeFile(css, readFile(css) & "\nmath { display: none; }\n"),

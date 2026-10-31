@@ -149,15 +149,15 @@ proc generatedProblems*(html: string): seq[string] =
   if "<text" notin html: result.add "no diagram labels"
 
 proc generatedSummary*(counts: JsonNode): string =
-  ## `maths and diagrams laid out: 12 formulas (4 fractions), 8 diagrams
+  ## `maths and diagrams laid out: 12 formulas (4 fractions, 8 display), 8 diagrams
   ## (40 labels); 0 hidden with their content`, summed over every page,
   ## width and scheme. Hidden ones sit in content the theme does not show
   ## in the page's initial state, and are not judged.
   proc count(key: string): int =
     if counts.isNil or counts.kind != JObject: 0 else: counts{key}.getInt(0)
   "maths and diagrams laid out: " & $count("maths") & " formulas (" & $count("fractions") &
-    " fractions), " & $count("diagrams") & " diagrams (" & $count("labels") & " labels); " &
-    $count("hidden") & " hidden with their content"
+    " fractions, " & $count("displays") & " display), " & $count("diagrams") & " diagrams (" &
+    $count("labels") & " labels); " & $count("hidden") & " hidden with their content"
 
 proc browserChecks*(output: string; pages: seq[string]): tuple[problems: seq[string], summary: string] =
   ## Run the browser driver: every problem it reports (or why it could not

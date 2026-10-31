@@ -468,6 +468,9 @@ keeps every dollar sign as written. The renderer is the
 KaTeX features outside [MathML Core](https://www.w3.org/TR/mathml-core/)
 (`\cancel`, bold or double-struck letters, aligned matrices) are refused
 rather than shown wrongly.
+A display formula wider than the page's column scrolls sideways inside its
+own box, which the keyboard can reach, rather than widening the page (see
+[Themes](themes.md#maths-and-diagrams)).
 
 `diagrams` lists the fenced diagram languages to render, at build time, to
 inline SVG: `d2` ([D2](https://d2lang.com/)) and `dot`
